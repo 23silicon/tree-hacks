@@ -14,6 +14,7 @@ import asyncio
 import json
 import time
 import sys
+import os
 import hashlib
 import xml.etree.ElementTree as ET
 
@@ -118,6 +119,14 @@ RSS_FEEDS = {
     "BBC World": "http://feeds.bbci.co.uk/news/world/rss.xml",
     "Al Jazeera": "https://www.aljazeera.com/xml/rss/all.xml",
     "NPR News": "https://feeds.npr.org/1001/rss.xml",
+    "WSJ World": "https://feeds.content.dowjones.io/public/rss/RSSWorldNews.xml",
+    "WSJ Opinion": "https://feeds.content.dowjones.io/public/rss/RSSOpinion.xml",
+    "Fox News World": "https://moxie.foxnews.com/google-publisher/world.xml",
+    "Fox News Politics": "https://moxie.foxnews.com/google-publisher/politics.xml",
+    "CBS News": "https://www.cbsnews.com/latest/rss/world",
+    "ABC News": "https://abcnews.go.com/abcnews/internationalheadlines",
+    "The Hill": "https://thehill.com/feed/",
+    "NY Post": "https://nypost.com/feed/",
 }
 
 
@@ -225,6 +234,252 @@ async def stream_bluesky(topic: str, duration: int = 20):
 
 
 # ============================================================
+# SOURCE: Reddit (公开JSON API，无需认证)
+# ============================================================
+
+REDDIT_SUBREDDITS = [
+    "worldnews",
+    "news",
+    "geopolitics",
+    "politics",
+    "economics",
+    "foreignpolicy",
+    "MiddleEastNews",
+    "iran",
+    "military",
+    "IntelligenceNews",
+    "worldpolitics",
+    "anime_titties",        # actually a serious world news sub
+    "neutralnews",
+    "UpliftingNews",
+    "business",
+    "stocks",
+    "wallstreetbets",
+]
+
+REDDIT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+}
+
+
+async def reddit_get(client: httpx.AsyncClient, url: str, params: dict) -> dict | None:
+    """Reddit GET with retry on 429."""
+    for attempt in range(3):
+        try:
+            resp = await client.get(url, params=params, timeout=10)
+            if resp.status_code == 200:
+                return resp.json()
+            if resp.status_code == 429:
+                wait = 5 * (attempt + 1)
+                print(f"  [REDDIT] Rate limited, waiting {wait}s...")
+                await asyncio.sleep(wait)
+                continue
+            return None
+        except Exception as e:
+            print(f"  [REDDIT] Request error: {e}")
+            return None
+    return None
+
+
+async def scrape_reddit(query: str):
+    """搜索Reddit帖子 — 通过Google News RSS抓Reddit内容绕过限流"""
+    count = 0
+
+    # 方法1: Google News搜reddit站内内容（不受Reddit限流）
+    reddit_news_url = f"https://news.google.com/rss/search?q={query}+site:reddit.com&hl=en-US&gl=US&ceid=US:en"
+    async with httpx.AsyncClient(follow_redirects=True) as client:
+        try:
+            resp = await client.get(reddit_news_url, timeout=10)
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.text)
+                for item in root.findall(".//item"):
+                    title = item.findtext("title", "")
+                    link = item.findtext("link", "")
+                    pub_date = item.findtext("pubDate", "")
+                    pid = f"reddit_g_{hashlib.md5(link.encode()).hexdigest()[:12]}"
+
+                    await broadcast({
+                        "type": "social",
+                        "id": pid,
+                        "source": "reddit",
+                        "author": "Reddit (via Google)",
+                        "text": title,
+                        "timestamp": pub_date,
+                        "url": link,
+                    })
+                    count += 1
+        except Exception as e:
+            print(f"  [REDDIT:google] Error: {e}")
+
+    # 方法2: 直接Reddit JSON（带重试，可能被限流）
+    async with httpx.AsyncClient(follow_redirects=True, headers=REDDIT_HEADERS) as client:
+        try:
+            result = await reddit_get(client, "https://www.reddit.com/search.json",
+                {"q": query, "sort": "new", "limit": 100, "t": "day"})
+            if result:
+                data = result.get("data", {}).get("children", [])
+                for item in data:
+                    d = item.get("data", {})
+                    pid = f"reddit_{d.get('id', '')}"
+                    title = d.get("title", "")
+                    selftext = d.get("selftext", "")[:200]
+                    text = f"{title}. {selftext}" if selftext else title
+
+                    await broadcast({
+                        "type": "social",
+                        "id": pid,
+                        "source": "reddit",
+                        "author": f"r/{d.get('subreddit', '?')} u/{d.get('author', '?')}",
+                        "text": text,
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(d.get("created_utc", 0))),
+                        "url": f"https://reddit.com{d.get('permalink', '')}",
+                        "score": d.get("score", 0),
+                        "comments": d.get("num_comments", 0),
+                    })
+                    count += 1
+        except Exception as e:
+            print(f"  [REDDIT] Search error: {e}")
+
+        # 2. 每个子版块：关键词搜索 + 热门帖子（不限关键词）
+        for sub in REDDIT_SUBREDDITS:
+            try:
+                # 搜索匹配的
+                result = await reddit_get(client, f"https://www.reddit.com/r/{sub}/search.json",
+                    {"q": query, "sort": "new", "restrict_sr": "on", "limit": 50, "t": "day"})
+                if result:
+                    data = result.get("data", {}).get("children", [])
+                    for item in data:
+                        d = item.get("data", {})
+                        pid = f"reddit_{d.get('id', '')}"
+                        title = d.get("title", "")
+                        selftext = d.get("selftext", "")[:200]
+                        text = f"{title}. {selftext}" if selftext else title
+
+                        await broadcast({
+                            "type": "social",
+                            "id": pid,
+                            "source": "reddit",
+                            "author": f"r/{sub} u/{d.get('author', '?')}",
+                            "text": text,
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(d.get("created_utc", 0))),
+                            "url": f"https://reddit.com{d.get('permalink', '')}",
+                            "score": d.get("score", 0),
+                            "comments": d.get("num_comments", 0),
+                        })
+                        count += 1
+                await asyncio.sleep(1)
+
+                await asyncio.sleep(2)
+                # 也拉这个版块的最新帖子（不限关键词，拉更多数据）
+                result2 = await reddit_get(client, f"https://www.reddit.com/r/{sub}/new.json",
+                    {"limit": 50})
+                if result2:
+                    data = result2.get("data", {}).get("children", [])
+                    for item in data:
+                        d = item.get("data", {})
+                        pid = f"reddit_{d.get('id', '')}"
+                        title = d.get("title", "")
+                        selftext = d.get("selftext", "")[:200]
+                        text = f"{title}. {selftext}" if selftext else title
+
+                        await broadcast({
+                            "type": "social",
+                            "id": pid,
+                            "source": "reddit",
+                            "author": f"r/{sub} u/{d.get('author', '?')}",
+                            "text": text,
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(d.get("created_utc", 0))),
+                            "url": f"https://reddit.com{d.get('permalink', '')}",
+                            "score": d.get("score", 0),
+                            "comments": d.get("num_comments", 0),
+                        })
+                        count += 1
+                await asyncio.sleep(1)
+            except Exception as e:
+                print(f"  [REDDIT:r/{sub}] Error: {e}")
+
+    print(f"[REDDIT] {count} posts collected")
+
+
+async def scrape_reddit_comments(query: str):
+    """抓Reddit热门帖子的评论 — 这是大量数据的来源"""
+    keywords = [kw.lower() for kw in query.split()]
+    count = 0
+
+    async with httpx.AsyncClient(follow_redirects=True, headers=REDDIT_HEADERS) as client:
+        # 先找热门帖子
+        try:
+            resp = await client.get(
+                "https://www.reddit.com/search.json",
+                params={"q": query, "sort": "hot", "limit": 10, "t": "day"},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                return
+
+            posts = resp.json().get("data", {}).get("children", [])
+
+            for post in posts[:8]:
+                permalink = post.get("data", {}).get("permalink", "")
+                if not permalink:
+                    continue
+
+                await asyncio.sleep(1)  # rate limit
+
+                # 抓这个帖子的评论
+                try:
+                    resp2 = await client.get(
+                        f"https://www.reddit.com{permalink}.json",
+                        params={"limit": 50, "sort": "top"},
+                        timeout=10,
+                    )
+                    if resp2.status_code != 200:
+                        continue
+
+                    data = resp2.json()
+                    if len(data) < 2:
+                        continue
+
+                    comments = data[1].get("data", {}).get("children", [])
+                    for comment in comments:
+                        c = comment.get("data", {})
+                        body = c.get("body", "")
+                        if not body or body == "[deleted]" or body == "[removed]":
+                            continue
+
+                        cid = f"reddit_c_{c.get('id', '')}"
+
+                        await broadcast({
+                            "type": "social",
+                            "id": cid,
+                            "source": "reddit",
+                            "author": f"r/{c.get('subreddit', '?')} u/{c.get('author', '?')}",
+                            "text": body[:500],
+                            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(c.get("created_utc", 0))),
+                            "url": f"https://reddit.com{permalink}",
+                            "score": c.get("score", 0),
+                        })
+                        count += 1
+
+                except Exception as e:
+                    print(f"  [REDDIT:comments] Error: {e}")
+
+        except Exception as e:
+            print(f"  [REDDIT:comments] Error: {e}")
+
+    print(f"[REDDIT COMMENTS] {count} comments collected")
+
+
+async def reddit_loop(topic: str):
+    """持续轮询Reddit，每60秒一次（避免429限流）"""
+    while True:
+        await asyncio.sleep(60)
+        await scrape_reddit(topic)
+        await asyncio.sleep(10)
+        await scrape_reddit_comments(topic)
+
+
+# ============================================================
 # SOURCE: Polymarket (预测市场)
 # ============================================================
 
@@ -305,6 +560,7 @@ async def poll_loop(topic: str, interval: int = 45):
             scrape_all_news(topic),
             scrape_all_rss(topic),
             scrape_polymarket(topic),
+            scrape_reddit(topic),
         )
         print(f"[REFRESH] Total items streamed: {len(ALL_DATA)}")
 
@@ -343,6 +599,23 @@ async def ws_handler(ws):
         print(f"[WS] -1 client — {len(CONNECTIONS)} connected")
 
 
+def run_http_server(http_port: int):
+    """Serve live_viewer.html on an HTTP port so the browser can connect to WS."""
+    from http.server import HTTPServer, SimpleHTTPRequestHandler
+    import threading
+
+    class Handler(SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=os.path.dirname(__file__), **kwargs)
+        def log_message(self, format, *args):
+            pass  # suppress logs
+
+    server = HTTPServer(("0.0.0.0", http_port), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    print(f"[HTTP] Serving viewer at http://0.0.0.0:{http_port}/live_viewer.html")
+
+
 async def main(topic: str, port: int = 8765):
     # 获取本机IP
     import socket
@@ -354,21 +627,20 @@ async def main(topic: str, port: int = 8765):
     except Exception:
         local_ip = "localhost"
 
+    http_port = port + 1  # 8766
+    run_http_server(http_port)
+
     print(f"""
 {'='*60}
   HIVEMIND DATA STREAM
   Topic: {topic}
 {'='*60}
 
-  Tell your teammates to connect to:
+  OPEN IN BROWSER:
+    http://{local_ip}:{http_port}/live_viewer.html
 
+  WebSocket for teammates:
     ws://{local_ip}:{port}
-
-  They will receive JSON messages with types:
-    "news"    — news articles
-    "social"  — social media posts
-    "market"  — prediction market data
-    "snapshot"— full data dump (on connect)
 
 {'='*60}
 """)
@@ -380,15 +652,18 @@ async def main(topic: str, port: int = 8765):
             scrape_all_news(topic),
             scrape_all_rss(topic),
             scrape_polymarket(topic),
+            scrape_reddit(topic),
+            scrape_reddit_comments(topic),
             stream_bluesky(topic, duration=15),
         )
 
         print(f"\n[INIT] Done — {len(ALL_DATA)} total items streamed")
-        print(f"[INIT] Entering continuous mode (refresh every 45s + live Bluesky)\n")
+        print(f"[INIT] Entering continuous mode\n")
 
-        # 持续运行
+        # 持续运行：新闻轮询 + Reddit轮询 + Bluesky实时
         await asyncio.gather(
             poll_loop(topic, interval=45),
+            reddit_loop(topic),
             bluesky_loop(topic),
         )
 
