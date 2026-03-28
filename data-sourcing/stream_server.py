@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ET
 
 import httpx
 import websockets
-from websockets.server import serve
+from websockets.asyncio.server import serve
 
 # ============================================================
 # CONNECTIONS
@@ -31,6 +31,7 @@ SEEN_IDS: set = set()
 
 
 async def broadcast(data: dict):
+    global CONNECTIONS
     if data.get("id") in SEEN_IDS:
         return
     if data.get("id"):
