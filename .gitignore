@@ -1,3 +1,11 @@
+__pycache__/
+*.pyc
+output.json
+hivemind_output.json
+enriched_output.json
+final_output.json
+topic_*.json
+.env
 sentiment-tree/.env
 sentiment-tree/__pycache__/
 sentiment-tree/pipeline/__pycache__/

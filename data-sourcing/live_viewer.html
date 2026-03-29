@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hivemind Live Feed</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0a0a1a; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; padding: 20px; }
+
+.header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #00ff88; }
+.header-left h1 { color: #00ff88; font-size: 22px; letter-spacing: 3px; }
+.header-left .sub { color: #666; font-size: 11px; margin-top: 3px; }
+.header-right { display: flex; align-items: center; gap: 15px; }
+.status { padding: 4px 12px; border-radius: 12px; font-size: 11px; font-weight: 700; letter-spacing: 2px; }
+.status.live { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid #00ff88; animation: pulse 2s infinite; }
+.status.offline { background: rgba(255,107,107,0.15); color: #ff6b6b; border: 1px solid #ff6b6b; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+.counter { color: #888; font-size: 13px; }
+.counter b { color: #00ff88; }
+
+.filters { display: flex; gap: 8px; margin-bottom: 15px; flex-wrap: wrap; }
+.filter-btn { background: #1e1e3a; color: #888; border: 1px solid #1e1e3a; padding: 4px 12px; border-radius: 15px; font-size: 11px; cursor: pointer; font-family: inherit; }
+.filter-btn.active { color: #00ff88; border-color: #00ff88; background: rgba(0,255,136,0.1); }
+.filter-btn:hover { border-color: #444; }
+
+#cards { display: flex; flex-direction: column; gap: 10px; }
+
+.card {
+  background: #111128;
+  border: 1px solid #1e1e3a;
+  border-left: 4px solid #00ff88;
+  border-radius: 8px;
+  padding: 14px 16px;
+  cursor: pointer;
+  transition: all 0.3s;
+  animation: slideIn 0.4s ease-out;
+}
+.card.new { border-left-color: #ffd93d; background: #1a1a30; }
+.card:hover { border-left-color: #ffd93d; background: #161640; transform: translateX(4px); }
+@keyframes slideIn { from { opacity: 0; transform: translateY(-15px); } to { opacity: 1; transform: translateY(0); } }
+
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.source { padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 700; }
+.source.google_news { background: rgba(0,255,136,0.15); color: #00ff88; }
+.source.bluesky, .source.social { background: rgba(0,133,255,0.2); color: #4dabf7; }
+.source.reddit { background: rgba(255,69,0,0.2); color: #ff6b35; }
+.source.market { background: rgba(255,217,61,0.15); color: #ffd93d; }
+.source.rss { background: rgba(177,151,252,0.2); color: #b197fc; }
+.time { color: #555; font-size: 10px; }
+.headline { font-size: 14px; line-height: 1.5; color: #ddd; }
+.type-tag { color: #555; font-size: 10px; margin-left: 8px; }
+.author-handle { color: #666; font-size: 10px; margin-left: 6px; }
+
+/* Popup */
+.overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); z-index: 100; justify-content: center; align-items: center; }
+.overlay.active { display: flex; }
+.popup { background: #111128; border: 2px solid #00ff88; border-radius: 12px; padding: 30px; max-width: 700px; width: 90%; position: relative; }
+.popup .close { position: absolute; top: 10px; right: 15px; color: #666; font-size: 24px; cursor: pointer; }
+.popup .close:hover { color: #ff6b6b; }
+.popup .source-big { font-size: 14px; background: rgba(0,255,136,0.15); color: #00ff88; padding: 5px 15px; border-radius: 12px; display: inline-block; margin-bottom: 12px; }
+.popup .headline-big { font-size: 20px; line-height: 1.5; color: #fff; margin-bottom: 15px; }
+.popup .time-big { color: #888; font-size: 13px; margin-bottom: 8px; }
+.popup .desc { color: #aaa; font-size: 13px; line-height: 1.6; margin-bottom: 15px; }
+.popup .link { color: #4dabf7; font-size: 13px; }
+.popup .nav { display: flex; justify-content: space-between; margin-top: 20px; }
+.popup .nav button { background: #1e1e3a; color: #00ff88; border: 1px solid #00ff88; padding: 8px 20px; border-radius: 6px; cursor: pointer; font-family: inherit; }
+.popup .nav button:hover { background: #00ff88; color: #0a0a1a; }
+.popup .counter { color: #666; font-size: 12px; }
+
+.market-data { background: #0a0a1a; padding: 10px; border-radius: 6px; margin-top: 10px; }
+.market-data .yes { color: #00ff88; font-weight: 700; font-size: 16px; }
+.market-data .no { color: #ff6b6b; font-weight: 700; font-size: 16px; }
+.market-data .vol { color: #666; font-size: 11px; }
+
+.toast { position: fixed; top: 20px; right: 20px; background: #00ff88; color: #0a0a1a; padding: 8px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; z-index: 200; animation: fadeInOut 3s forwards; }
+@keyframes fadeInOut { 0%{opacity:0;transform:translateY(-10px)} 10%{opacity:1;transform:translateY(0)} 80%{opacity:1} 100%{opacity:0} }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>HIVEMIND LIVE</h1>
+    <div class="sub">Real-time data stream</div>
+  </div>
+  <div class="header-right">
+    <div class="counter"><b id="total">0</b> items</div>
+    <div class="status offline" id="status">OFFLINE</div>
+  </div>
+</div>
+
+<div class="filters">
+  <button class="filter-btn active" data-filter="all">All <span id="cnt-all">0</span></button>
+  <button class="filter-btn" data-filter="news">News <span id="cnt-news">0</span></button>
+  <button class="filter-btn" data-filter="reddit">Reddit <span id="cnt-reddit">0</span></button>
+  <button class="filter-btn" data-filter="bluesky">Bluesky <span id="cnt-bluesky">0</span></button>
+  <button class="filter-btn" data-filter="social">All Social <span id="cnt-social">0</span></button>
+  <button class="filter-btn" data-filter="market">Markets <span id="cnt-market">0</span></button>
+</div>
+
+<div id="cards"></div>
+
+<div class="overlay" id="overlay" onclick="if(event.target===this)closePopup()">
+  <div class="popup">
+    <span class="close" onclick="closePopup()">&times;</span>
+    <div class="source-big" id="p-source"></div>
+    <div class="headline-big" id="p-headline"></div>
+    <div class="time-big" id="p-time"></div>
+    <div class="desc" id="p-desc"></div>
+    <div class="market-data" id="p-market" style="display:none"></div>
+    <a class="link" id="p-link" href="#" target="_blank">Open article →</a>
+    <div class="nav">
+      <button onclick="navigate(-1)">← Prev</button>
+      <span class="counter" id="p-counter"></span>
+      <button onclick="navigate(1)">Next →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// HTTP is on 8766, WS is on 8765 (one port below)
+const wsPort = parseInt(window.location.port) - 1;
+const WS_URL = "ws://" + window.location.hostname + ":" + wsPort;
+let posts = [];
+let filtered = [];
+let current = 0;
+let activeFilter = "all";
+let ws;
+
+function connect() {
+  ws = new WebSocket(WS_URL);
+
+  ws.onopen = () => {
+    document.getElementById("status").className = "status live";
+    document.getElementById("status").textContent = "LIVE";
+    showToast("Connected to Hivemind stream");
+  };
+
+  ws.onclose = () => {
+    document.getElementById("status").className = "status offline";
+    document.getElementById("status").textContent = "OFFLINE";
+    setTimeout(connect, 3000);
+  };
+
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+
+    if (data.type === "snapshot") {
+      // Initial data dump
+      const items = data.data || [];
+      items.forEach(item => addItem(item, false));
+      applyFilter();
+      showToast(`Loaded ${items.length} items`);
+    } else {
+      addItem(data, true);
+    }
+  };
+}
+
+function addItem(item, isNew) {
+  // Dedup
+  if (item.id && posts.find(p => p.id === item.id)) return;
+  if (item.type === "status") {
+    showToast(item.message);
+    return;
+  }
+
+  item._isNew = isNew;
+  posts.unshift(item);
+  document.getElementById("total").textContent = posts.length;
+  updateCounts();
+
+  if (matchesFilter(item, activeFilter)) {
+    filtered.unshift(item);
+    renderCard(item, true);
+  }
+}
+
+function matchesFilter(item, filter) {
+  if (filter === "all") return true;
+  if (filter === "news") return item.type === "news";
+  if (filter === "reddit") return item.source === "reddit";
+  if (filter === "bluesky") return item.source === "bluesky";
+  if (filter === "social") return item.type === "social";
+  if (filter === "market") return item.type === "market";
+  return true;
+}
+
+function updateCounts() {
+  const el = (id) => document.getElementById(id);
+  el("cnt-all").textContent = posts.length;
+  el("cnt-news").textContent = posts.filter(p => p.type === "news").length;
+  el("cnt-reddit").textContent = posts.filter(p => p.source === "reddit").length;
+  el("cnt-bluesky").textContent = posts.filter(p => p.source === "bluesky").length;
+  el("cnt-social").textContent = posts.filter(p => p.type === "social").length;
+  el("cnt-market").textContent = posts.filter(p => p.type === "market").length;
+}
+
+function renderCard(item, prepend) {
+  const container = document.getElementById("cards");
+  const card = document.createElement("div");
+  const idx = filtered.indexOf(item);
+  const sourceClass = item.type || item.source || "";
+
+  let content = "";
+  if (item.type === "market") {
+    const yes = (item.yes_price * 100).toFixed(1);
+    const no = (item.no_price * 100).toFixed(1);
+    content = `
+      <div class="card-header">
+        <span><span class="source market">POLYMARKET</span></span>
+        <span class="time">${item.timestamp || ""}</span>
+      </div>
+      <div class="headline">${item.question || ""}</div>
+      <div style="margin-top:6px"><span style="color:#00ff88;font-weight:700">YES ${yes}%</span> &nbsp; <span style="color:#ff6b6b;font-weight:700">NO ${no}%</span> &nbsp; <span style="color:#666;font-size:11px">Vol: $${(item.volume||0).toLocaleString()}</span></div>
+    `;
+  } else {
+    // Show platform badge for social posts
+    const platform = item.source || "unknown";
+    const platformLabel = {bluesky:"BLUESKY",twitter:"TWITTER",reddit:"REDDIT",mastodon:"MASTODON"}[platform] || "";
+    const platformClass = platform === "reddit" ? "reddit" : "social";
+    const authorDisplay = item.type === "social"
+      ? `<span class="source ${platformClass}">${platformLabel}</span><span class="author-handle">${(item.author||"").slice(0,35)}</span>`
+      : `<span class="source ${sourceClass}">${item.author || item.source || "?"}</span>`;
+
+    content = `
+      <div class="card-header">
+        <span>${authorDisplay}<span class="type-tag">${item.type || ""}</span></span>
+        <span class="time">${item.timestamp || ""}</span>
+      </div>
+      <div class="headline">${item.text || ""}</div>
+    `;
+  }
+
+  card.className = "card" + (item._isNew ? " new" : "");
+  card.innerHTML = content;
+  card.onclick = () => openPopup(idx);
+
+  if (item._isNew) {
+    setTimeout(() => card.classList.remove("new"), 5000);
+  }
+
+  if (prepend) {
+    container.prepend(card);
+  } else {
+    container.appendChild(card);
+  }
+}
+
+function applyFilter() {
+  activeFilter = this?.dataset?.filter || activeFilter;
+  filtered = posts.filter(p => matchesFilter(p, activeFilter));
+  document.getElementById("cards").innerHTML = "";
+  filtered.forEach(item => renderCard(item, false));
+
+  document.querySelectorAll(".filter-btn").forEach(b => {
+    b.classList.toggle("active", b.dataset.filter === activeFilter);
+  });
+}
+
+document.querySelectorAll(".filter-btn").forEach(b => b.addEventListener("click", applyFilter));
+
+// Popup
+function openPopup(i) {
+  current = i;
+  renderPopup();
+  document.getElementById("overlay").classList.add("active");
+}
+function closePopup() { document.getElementById("overlay").classList.remove("active"); }
+function navigate(dir) { current = (current + dir + filtered.length) % filtered.length; renderPopup(); }
+
+function renderPopup() {
+  const p = filtered[current];
+  const platformNames = {bluesky:"Bluesky",twitter:"Twitter/X",reddit:"Reddit",mastodon:"Mastodon",google_news:"Google News"};
+  const sourceLabel = p.type === "social"
+    ? `${platformNames[p.source] || p.source} — ${(p.author||"").slice(0,30)}`
+    : p.author || p.source || "?";
+  document.getElementById("p-source").textContent = sourceLabel;
+  document.getElementById("p-headline").textContent = p.text || p.question || "";
+  document.getElementById("p-time").textContent = p.timestamp || "";
+  document.getElementById("p-desc").textContent = p.description || "";
+  document.getElementById("p-counter").textContent = (current+1) + " / " + filtered.length;
+
+  const link = document.getElementById("p-link");
+  const mkt = document.getElementById("p-market");
+
+  if (p.url) { link.href = p.url; link.style.display = ""; }
+  else { link.style.display = "none"; }
+
+  if (p.type === "market") {
+    mkt.style.display = "";
+    mkt.innerHTML = `<span class="yes">YES ${(p.yes_price*100).toFixed(1)}%</span> &nbsp; <span class="no">NO ${(p.no_price*100).toFixed(1)}%</span><br><span class="vol">Volume: $${(p.volume||0).toLocaleString()}</span>`;
+  } else {
+    mkt.style.display = "none";
+  }
+}
+
+document.addEventListener("keydown", (e) => {
+  if (!document.getElementById("overlay").classList.contains("active")) return;
+  if (e.key === "ArrowLeft") navigate(-1);
+  if (e.key === "ArrowRight") navigate(1);
+  if (e.key === "Escape") closePopup();
+});
+
+function showToast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+connect();
+</script>
+</body>
+</html>

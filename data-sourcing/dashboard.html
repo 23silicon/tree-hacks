@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Hivemind</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0a0a1a; color: #e0e0e0; font-family: 'SF Mono', 'Fira Code', monospace; }
+
+/* Header */
+.header {
+  padding: 12px 20px;
+  background: #111128;
+  border-bottom: 2px solid #00ff88;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.header h1 { color: #00ff88; font-size: 20px; letter-spacing: 3px; }
+.header-right { display: flex; align-items: center; gap: 16px; }
+.stats { display: flex; gap: 14px; font-size: 11px; color: #888; }
+.stats b { color: #00ff88; }
+.status { padding: 4px 12px; border-radius: 12px; font-size: 10px; font-weight: 700; letter-spacing: 2px; }
+.status.live { background: rgba(0,255,136,0.15); color: #00ff88; border: 1px solid #00ff88; animation: pulse 2s infinite; }
+.status.off { background: rgba(255,107,107,0.15); color: #ff6b6b; border: 1px solid #ff6b6b; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.6} }
+
+/* Search bar */
+.search-bar { display: flex; gap: 8px; }
+.search-bar input {
+  background: #0a0a1a; border: 1px solid #1e1e3a; color: #e0e0e0;
+  padding: 6px 12px; border-radius: 4px; font-family: inherit; font-size: 12px; width: 200px;
+}
+.search-bar input:focus { outline: none; border-color: #00ff88; }
+.search-bar button {
+  background: #00ff88; color: #0a0a1a; border: none; padding: 6px 14px;
+  border-radius: 4px; font-family: inherit; font-weight: 700; cursor: pointer; font-size: 11px;
+}
+.search-bar button:hover { opacity: 0.85; }
+
+/* Layout */
+.main { display: flex; height: calc(100vh - 52px); }
+
+/* Left: Topics */
+.topics-panel { width: 340px; border-right: 1px solid #1e1e3a; overflow-y: auto; padding: 10px; flex-shrink: 0; }
+.topics-panel h2 { color: #666; font-size: 10px; letter-spacing: 2px; margin-bottom: 8px; text-transform: uppercase; }
+
+.topic-card {
+  background: #111128; border: 1px solid #1e1e3a; border-radius: 6px;
+  padding: 10px 12px; margin-bottom: 6px; cursor: pointer; transition: all 0.2s;
+}
+.topic-card:hover, .topic-card.active { border-color: #00ff88; background: #161640; }
+.topic-card.active { box-shadow: 0 0 8px rgba(0,255,136,0.1); }
+.topic-name { font-size: 12px; font-weight: 700; color: #fff; margin-bottom: 4px; line-height: 1.3; }
+.topic-meta { display: flex; gap: 8px; align-items: center; font-size: 10px; color: #888; }
+.cat-tag { padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 700; }
+.cat-military { background: rgba(255,107,107,0.2); color: #ff6b6b; }
+.cat-politics { background: rgba(177,151,252,0.2); color: #b197fc; }
+.cat-diplomatic { background: rgba(0,133,255,0.2); color: #4dabf7; }
+.cat-economic { background: rgba(255,217,61,0.2); color: #ffd93d; }
+.cat-social { background: rgba(0,255,136,0.2); color: #00ff88; }
+.cat-humanitarian { background: rgba(255,150,150,0.2); color: #ffa8a8; }
+.cat-general, .cat-tech { background: rgba(150,150,150,0.2); color: #aaa; }
+.heat-bar { height: 3px; border-radius: 2px; background: #1e1e3a; margin-top: 5px; }
+.heat-fill { height: 100%; border-radius: 2px; transition: width 0.5s; }
+
+/* Right: Feed */
+.feed-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+/* Topic detail bar */
+.detail-bar {
+  background: #111128; padding: 12px 16px; border-bottom: 1px solid #1e1e3a;
+  display: none;
+}
+.detail-bar.active { display: block; }
+.detail-bar h3 { color: #00ff88; font-size: 14px; margin-bottom: 6px; }
+.detail-stats { display: flex; gap: 12px; font-size: 11px; }
+.detail-stats .st { color: #888; }
+.detail-stats b { color: #fff; }
+.keywords-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.kw { padding: 2px 8px; border-radius: 10px; background: rgba(0,255,136,0.1); color: #00ff88; font-size: 10px; }
+.clear-btn { background: none; border: 1px solid #555; color: #888; padding: 2px 10px; border-radius: 10px; font-size: 10px; cursor: pointer; margin-left: 10px; }
+.clear-btn:hover { border-color: #ff6b6b; color: #ff6b6b; }
+
+/* Source breakdown inline */
+.source-bars { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.src-bar { display: flex; align-items: center; gap: 4px; font-size: 10px; }
+.src-bar .bar { height: 10px; border-radius: 2px; background: #00ff88; }
+.src-bar .nm { color: #888; }
+.src-bar .ct { color: #555; }
+
+/* Filters */
+.filters { display: flex; gap: 6px; padding: 8px 16px; border-bottom: 1px solid #1e1e3a; flex-wrap: wrap; }
+.filter-btn { background: #1e1e3a; color: #888; border: 1px solid #1e1e3a; padding: 3px 10px; border-radius: 12px; font-size: 10px; cursor: pointer; font-family: inherit; }
+.filter-btn.active { color: #00ff88; border-color: #00ff88; background: rgba(0,255,136,0.1); }
+
+/* Cards */
+.feed-list { flex: 1; overflow-y: auto; padding: 10px 16px; }
+
+.card {
+  background: #111128; border: 1px solid #1e1e3a; border-left: 3px solid #00ff88;
+  border-radius: 6px; padding: 10px 14px; margin-bottom: 6px; cursor: pointer;
+  transition: all 0.2s; animation: slideIn 0.3s ease-out;
+}
+.card.new { border-left-color: #ffd93d; background: #1a1a30; }
+.card:hover { border-left-color: #ffd93d; background: #161640; }
+@keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+.source { padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 700; }
+.source.google_news, .source.news { background: rgba(0,255,136,0.15); color: #00ff88; }
+.source.bluesky, .source.social { background: rgba(0,133,255,0.2); color: #4dabf7; }
+.source.reddit { background: rgba(255,69,0,0.2); color: #ff6b35; }
+.source.market { background: rgba(255,217,61,0.15); color: #ffd93d; }
+.author-handle { color: #555; font-size: 9px; margin-left: 4px; }
+.time { color: #444; font-size: 9px; }
+.headline { font-size: 12px; line-height: 1.4; color: #ddd; }
+
+/* Popup */
+.overlay { display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); z-index:100; justify-content:center; align-items:center; }
+.overlay.active { display: flex; }
+.popup { background:#111128; border:2px solid #00ff88; border-radius:12px; padding:24px; max-width:650px; width:90%; position:relative; }
+.popup .close { position:absolute; top:8px; right:12px; color:#666; font-size:20px; cursor:pointer; }
+.popup .close:hover { color:#ff6b6b; }
+.popup .p-src { font-size:13px; background:rgba(0,255,136,0.15); color:#00ff88; padding:4px 12px; border-radius:10px; display:inline-block; margin-bottom:10px; }
+.popup .p-text { font-size:17px; line-height:1.5; color:#fff; margin-bottom:12px; }
+.popup .p-time { color:#888; font-size:12px; margin-bottom:8px; }
+.popup .p-link { color:#4dabf7; font-size:12px; }
+.popup .nav { display:flex; justify-content:space-between; margin-top:16px; }
+.popup .nav button { background:#1e1e3a; color:#00ff88; border:1px solid #00ff88; padding:6px 16px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:11px; }
+.popup .nav button:hover { background:#00ff88; color:#0a0a1a; }
+.popup .nav .ctr { color:#666; font-size:11px; }
+
+.toast { position:fixed; top:16px; right:16px; background:#00ff88; color:#0a0a1a; padding:6px 14px; border-radius:6px; font-size:11px; font-weight:700; z-index:200; animation: fadeOut 3s forwards; }
+@keyframes fadeOut { 0%{opacity:0;transform:translateY(-10px)} 10%{opacity:1;transform:translateY(0)} 80%{opacity:1} 100%{opacity:0} }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>HIVEMIND</h1>
+  <div class="search-bar">
+    <input id="search-input" type="text" placeholder="Search a topic..." />
+    <button onclick="searchTopic()">Explore</button>
+  </div>
+  <div class="header-right">
+    <div class="stats">
+      <span><b id="total">0</b> items</span>
+      <span><b id="topic-count">0</b> topics</span>
+    </div>
+    <div class="status off" id="status">OFFLINE</div>
+  </div>
+</div>
+
+<div class="main">
+  <!-- Left: Topics -->
+  <div class="topics-panel">
+    <h2>Trending Topics</h2>
+    <div id="topic-list"><div style="color:#555;padding:20px;text-align:center;font-style:italic">Discovering topics...</div></div>
+  </div>
+
+  <!-- Right: Feed -->
+  <div class="feed-panel">
+    <div class="detail-bar" id="detail-bar">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <h3 id="db-name"></h3>
+        <button class="clear-btn" onclick="clearTopicFilter()">Show All</button>
+      </div>
+      <div class="detail-stats">
+        <span class="st">Heat: <b id="db-heat"></b></span>
+        <span class="st">Articles: <b id="db-count"></b></span>
+        <span class="st">Sources: <b id="db-sources"></b></span>
+      </div>
+      <div class="keywords-row" id="db-keywords"></div>
+      <div class="source-bars" id="db-chart"></div>
+    </div>
+
+    <div class="filters">
+      <button class="filter-btn active" data-filter="all">All <span id="cnt-all">0</span></button>
+      <button class="filter-btn" data-filter="news">News <span id="cnt-news">0</span></button>
+      <button class="filter-btn" data-filter="reddit">Reddit <span id="cnt-reddit">0</span></button>
+      <button class="filter-btn" data-filter="bluesky">Bluesky <span id="cnt-bluesky">0</span></button>
+      <button class="filter-btn" data-filter="market">Markets <span id="cnt-market">0</span></button>
+    </div>
+
+    <div class="feed-list" id="cards"></div>
+  </div>
+</div>
+
+<!-- Popup -->
+<div class="overlay" id="overlay" onclick="if(event.target===this)closePopup()">
+  <div class="popup">
+    <span class="close" onclick="closePopup()">&times;</span>
+    <div class="p-src" id="p-source"></div>
+    <div class="p-text" id="p-text"></div>
+    <div class="p-time" id="p-time"></div>
+    <a class="p-link" id="p-link" href="#" target="_blank">Open article →</a>
+    <div class="nav">
+      <button onclick="navigate(-1)">← Prev</button>
+      <span class="ctr" id="p-ctr"></span>
+      <button onclick="navigate(1)">Next →</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const wsPort = parseInt(window.location.port) - 1;
+const WS_URL = "ws://" + window.location.hostname + ":" + wsPort;
+
+let posts = [];
+let topics = [];
+let filtered = [];
+let current = 0;
+let activeFilter = "all";
+let activeTopic = null;
+let ws;
+
+// ---- WebSocket ----
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    document.getElementById("status").className = "status live";
+    document.getElementById("status").textContent = "LIVE";
+    toast("Connected");
+  };
+  ws.onclose = () => {
+    document.getElementById("status").className = "status off";
+    document.getElementById("status").textContent = "OFFLINE";
+    setTimeout(connect, 3000);
+  };
+  ws.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === "snapshot") {
+      (data.data || []).forEach(item => addItem(item, false));
+      applyFilter();
+    } else if (data.type === "topics") {
+      topics = data.topics || [];
+      document.getElementById("topic-count").textContent = topics.length;
+      renderTopics();
+      if (activeTopic) {
+        const updated = topics.find(t => t.id === activeTopic.id);
+        if (updated) selectTopic(updated);
+      }
+    } else if (data.type === "status") {
+      toast(data.message);
+    } else {
+      addItem(data, true);
+    }
+  };
+}
+
+// ---- Data ----
+function addItem(item, isNew) {
+  if (item.id && posts.find(p => p.id === item.id)) return;
+  if (!item.type || item.type === "status") return;
+  item._isNew = isNew;
+  posts.unshift(item);
+  document.getElementById("total").textContent = posts.length;
+  updateCounts();
+  if (matchesFilter(item)) {
+    filtered.unshift(item);
+    renderCard(item, true);
+  }
+}
+
+function matchesFilter(item) {
+  // Topic filter
+  if (activeTopic) {
+    const kws = (activeTopic.keywords || []).map(k => k.toLowerCase());
+    const text = (item.text || item.question || "").toLowerCase();
+    if (!kws.some(k => text.includes(k))) return false;
+  }
+  // Source filter
+  if (activeFilter === "all") return true;
+  if (activeFilter === "news") return item.type === "news";
+  if (activeFilter === "reddit") return item.source === "reddit";
+  if (activeFilter === "bluesky") return item.source === "bluesky";
+  if (activeFilter === "market") return item.type === "market";
+  return true;
+}
+
+function updateCounts() {
+  document.getElementById("cnt-all").textContent = posts.length;
+  document.getElementById("cnt-news").textContent = posts.filter(p => p.type === "news").length;
+  document.getElementById("cnt-reddit").textContent = posts.filter(p => p.source === "reddit").length;
+  document.getElementById("cnt-bluesky").textContent = posts.filter(p => p.source === "bluesky").length;
+  document.getElementById("cnt-market").textContent = posts.filter(p => p.type === "market").length;
+}
+
+// ---- Topics ----
+function renderTopics() {
+  const el = document.getElementById("topic-list");
+  el.innerHTML = "";
+  topics.forEach(t => {
+    const card = document.createElement("div");
+    card.className = "topic-card" + (activeTopic?.id === t.id ? " active" : "");
+    card.onclick = () => selectTopic(t);
+    const hPct = Math.round(t.heat * 100);
+    const hColor = t.heat > 0.8 ? "#ff6b6b" : t.heat > 0.5 ? "#ffd93d" : "#00ff88";
+    card.innerHTML = `
+      <div class="topic-name">${t.name}</div>
+      <div class="topic-meta">
+        <span class="cat-tag cat-${t.category||'general'}">${t.category||'general'}</span>
+        <span>${t.item_count} items</span>
+        <span>${hPct}%</span>
+      </div>
+      <div class="heat-bar"><div class="heat-fill" style="width:${hPct}%;background:${hColor}"></div></div>`;
+    el.appendChild(card);
+  });
+}
+
+function selectTopic(t) {
+  activeTopic = t;
+  renderTopics();
+  // Show detail bar
+  const bar = document.getElementById("detail-bar");
+  bar.className = "detail-bar active";
+  document.getElementById("db-name").textContent = t.name;
+  document.getElementById("db-heat").textContent = Math.round(t.heat * 100) + "%";
+  document.getElementById("db-count").textContent = t.item_count;
+  document.getElementById("db-sources").textContent = Object.keys(t.sources || {}).length;
+  document.getElementById("db-keywords").innerHTML = (t.keywords||[]).map(k => `<span class="kw">${k}</span>`).join("");
+  // Source chart
+  const srcEntries = Object.entries(t.sources||{}).sort((a,b) => b[1]-a[1]);
+  const maxS = srcEntries[0]?.[1] || 1;
+  document.getElementById("db-chart").innerHTML = srcEntries.slice(0,6).map(([n,c]) =>
+    `<div class="src-bar"><span class="nm">${n}</span><div class="bar" style="width:${Math.round(c/maxS*80)}px"></div><span class="ct">${c}</span></div>`
+  ).join("");
+  // Re-filter feed to this topic
+  applyFilter();
+}
+
+function clearTopicFilter() {
+  activeTopic = null;
+  document.getElementById("detail-bar").className = "detail-bar";
+  renderTopics();
+  applyFilter();
+}
+
+// ---- Feed ----
+function applyFilter() {
+  if (this?.dataset?.filter) activeFilter = this.dataset.filter;
+  filtered = posts.filter(matchesFilter);
+  document.getElementById("cards").innerHTML = "";
+  filtered.slice(0, 200).forEach(item => renderCard(item, false));
+  document.querySelectorAll(".filter-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.filter === activeFilter));
+}
+document.querySelectorAll(".filter-btn").forEach(b => b.addEventListener("click", applyFilter));
+
+function renderCard(item, prepend) {
+  const container = document.getElementById("cards");
+  const card = document.createElement("div");
+  const idx = filtered.indexOf(item);
+
+  let content;
+  if (item.type === "market") {
+    const y = (item.yes_price*100).toFixed(1), n = (item.no_price*100).toFixed(1);
+    content = `<div class="card-header"><span class="source market">POLYMARKET</span><span class="time">${item.timestamp||""}</span></div>
+      <div class="headline">${item.question||""}</div>
+      <div style="margin-top:4px"><span style="color:#00ff88;font-weight:700">YES ${y}%</span> <span style="color:#ff6b6b;font-weight:700">NO ${n}%</span></div>`;
+  } else {
+    const platform = item.source || "";
+    const pLabel = {bluesky:"BLUESKY",reddit:"REDDIT",twitter:"TWITTER"}[platform] || "";
+    const pClass = platform === "reddit" ? "reddit" : item.type === "social" ? "social" : "news";
+    const authorDisp = item.type === "social"
+      ? `<span class="source ${pClass}">${pLabel}</span><span class="author-handle">${(item.author||"").slice(0,30)}</span>`
+      : `<span class="source ${pClass}">${item.author||item.source||"?"}</span>`;
+    content = `<div class="card-header"><span>${authorDisp}</span><span class="time">${item.timestamp||""}</span></div>
+      <div class="headline">${item.text||""}</div>`;
+  }
+
+  card.className = "card" + (item._isNew ? " new" : "");
+  card.innerHTML = content;
+  card.onclick = () => openPopup(idx);
+  if (item._isNew) setTimeout(() => card.classList.remove("new"), 4000);
+  prepend ? container.prepend(card) : container.appendChild(card);
+}
+
+// ---- Popup ----
+function openPopup(i) { current = i; renderPopup(); document.getElementById("overlay").classList.add("active"); }
+function closePopup() { document.getElementById("overlay").classList.remove("active"); }
+function navigate(d) { current = (current + d + filtered.length) % filtered.length; renderPopup(); }
+function renderPopup() {
+  const p = filtered[current];
+  const pNames = {bluesky:"Bluesky",reddit:"Reddit",twitter:"Twitter/X",google_news:"Google News"};
+  const label = p.type === "social" ? `${pNames[p.source]||p.source} — ${(p.author||"").slice(0,30)}` : p.author||p.source||"?";
+  document.getElementById("p-source").textContent = label;
+  document.getElementById("p-text").textContent = p.text||p.question||"";
+  document.getElementById("p-time").textContent = p.timestamp||"";
+  document.getElementById("p-ctr").textContent = (current+1)+" / "+filtered.length;
+  const link = document.getElementById("p-link");
+  if (p.url) { link.href = p.url; link.style.display = ""; } else { link.style.display = "none"; }
+}
+document.addEventListener("keydown", e => {
+  if (!document.getElementById("overlay").classList.contains("active")) return;
+  if (e.key==="ArrowLeft") navigate(-1);
+  if (e.key==="ArrowRight") navigate(1);
+  if (e.key==="Escape") closePopup();
+});
+
+// ---- Search ----
+function searchTopic() {
+  const input = document.getElementById("search-input");
+  const topic = input.value.trim();
+  if (!topic || !ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify({ action: "search_topic", topic }));
+  toast(`Searching: ${topic}`);
+  input.value = "";
+}
+document.getElementById("search-input").addEventListener("keydown", e => { if (e.key === "Enter") searchTopic(); });
+
+function toast(msg) {
+  const t = document.createElement("div");
+  t.className = "toast";
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+connect();
+</script>
+</body>
+</html>
