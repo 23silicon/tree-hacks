@@ -21,7 +21,13 @@ import xml.etree.ElementTree as ET
 import httpx
 import websockets
 from websockets.asyncio.server import serve
+from dotenv import load_dotenv
 from aggregator import aggregator_loop
+from enrichment import enrichment_loop, enrich_data
+
+load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+
+YOUTUBE_API_KEY = os.environ.get("YOUTUBE_API_KEY", "")
 
 # ============================================================
 # CONNECTIONS
@@ -721,6 +727,103 @@ async def scrape_hackernews():
 
 
 # ============================================================
+# SOURCE: YouTube Data API (视频搜索 + 评论抓取)
+# ============================================================
+
+async def scrape_youtube(query: str):
+    """搜索YouTube视频 + 抓热门评论"""
+    if not YOUTUBE_API_KEY:
+        print("[YOUTUBE] No API key, skipping")
+        return
+
+    count = 0
+    async with httpx.AsyncClient() as client:
+        # 1. 搜索相关视频
+        try:
+            resp = await client.get("https://www.googleapis.com/youtube/v3/search", params={
+                "part": "snippet",
+                "q": query,
+                "type": "video",
+                "order": "date",
+                "maxResults": 20,
+                "key": YOUTUBE_API_KEY,
+            }, timeout=10)
+
+            if resp.status_code != 200:
+                print(f"[YOUTUBE] Search error: {resp.status_code}")
+                return
+
+            videos = resp.json().get("items", [])
+            video_ids = []
+
+            for v in videos:
+                vid = v.get("id", {}).get("videoId", "")
+                snippet = v.get("snippet", {})
+                title = snippet.get("title", "")
+                channel = snippet.get("channelTitle", "")
+                published = snippet.get("publishedAt", "")
+                description = snippet.get("description", "")[:200]
+
+                pid = f"yt_{vid}"
+                video_ids.append(vid)
+
+                await broadcast({
+                    "type": "social",
+                    "id": pid,
+                    "source": "youtube",
+                    "author": channel,
+                    "text": f"{title}. {description}" if description else title,
+                    "timestamp": published,
+                    "url": f"https://youtube.com/watch?v={vid}",
+                })
+                count += 1
+
+        except Exception as e:
+            print(f"[YOUTUBE] Search error: {e}")
+            return
+
+        # 2. 抓前5个视频的评论
+        for vid in video_ids[:5]:
+            try:
+                resp = await client.get("https://www.googleapis.com/youtube/v3/commentThreads", params={
+                    "part": "snippet",
+                    "videoId": vid,
+                    "order": "relevance",
+                    "maxResults": 20,
+                    "key": YOUTUBE_API_KEY,
+                }, timeout=10)
+
+                if resp.status_code != 200:
+                    continue
+
+                comments = resp.json().get("items", [])
+                for c in comments:
+                    cs = c.get("snippet", {}).get("topLevelComment", {}).get("snippet", {})
+                    text = cs.get("textDisplay", "")
+                    author = cs.get("authorDisplayName", "")
+                    published = cs.get("publishedAt", "")
+                    likes = cs.get("likeCount", 0)
+                    cid = f"yt_c_{c.get('id', '')[:12]}"
+
+                    await broadcast({
+                        "type": "social",
+                        "id": cid,
+                        "source": "youtube",
+                        "author": f"YT Comment: {author}",
+                        "text": text[:500],
+                        "timestamp": published,
+                        "url": f"https://youtube.com/watch?v={vid}",
+                        "score": likes,
+                    })
+                    count += 1
+
+            except Exception as e:
+                continue
+
+    print(f"[YOUTUBE] {count} videos + comments collected")
+
+
+# ============================================================
 # ON-DEMAND TOPIC SCRAPE (用户输入话题 → 立刻采集)
 # ============================================================
 
@@ -736,6 +839,7 @@ async def on_demand_scrape(topic: str):
         scrape_all_rss(topic),
         scrape_polymarket(topic),
         scrape_reddit(topic),
+        scrape_youtube(topic),
     )
 
     new_count = len(ALL_DATA) - before
@@ -821,6 +925,7 @@ async def poll_loop(topic: str, interval: int = 45):
             scrape_reddit(topic),
             scrape_hackernews(),
             scrape_trending(),
+            scrape_youtube(topic),
         )
         print(f"[REFRESH] Total items streamed: {len(ALL_DATA)}")
 
@@ -935,7 +1040,8 @@ async def main(topic: str, port: int = 8765):
             scrape_reddit(topic),
             scrape_hackernews(),
             scrape_trending(),
-            stream_bluesky(topic, duration=5),  # 缩短到5秒，后面loop继续监听
+            scrape_youtube(topic),
+            stream_bluesky(topic, duration=5),
         )
 
         print(f"\n[INIT] Done — {len(ALL_DATA)} total items streamed")
@@ -962,14 +1068,22 @@ async def main(topic: str, port: int = 8765):
         except Exception as e:
             print(f"[INIT] Topic discovery error: {e}")
 
+        # 立刻跑enrichment
+        print("[INIT] Running enrichment (dedup + entities + contradictions)...\n")
+        try:
+            await enrich_data(ALL_DATA, broadcast)
+        except Exception as e:
+            print(f"[INIT] Enrichment error: {e}")
+
         print(f"[INIT] Entering continuous mode\n")
 
-        # 持续运行：新闻轮询 + Reddit轮询 + Bluesky实时 + 话题聚合
+        # 持续运行
         await asyncio.gather(
             poll_loop(topic, interval=45),
             reddit_loop(topic),
             bluesky_loop(topic),
             aggregator_loop(ALL_DATA, broadcast, interval=30),
+            enrichment_loop(ALL_DATA, broadcast, interval=60),
             json_save_loop(interval=30),
         )
 
