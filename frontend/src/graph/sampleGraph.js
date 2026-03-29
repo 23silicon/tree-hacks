@@ -194,13 +194,8 @@ const sampleEdges = [
   { id: "e-root-nb1", source: "root", target: "newbranch-1" },
   { id: "e-root-nb2", source: "root", target: "newbranch-2" },
 
-  // Branch chains into predictions
+  // branch ↔ newBranch only (predictions are visually separate for now)
   { id: "e-b1-nb1", source: "branch-1", target: "newbranch-1" },
-  { id: "e-b2-pred1", source: "branch-2", target: "pred-1" },
-  { id: "e-nb2-pred2", source: "newbranch-2", target: "pred-2" },
-  { id: "e-b3-pred1", source: "branch-3", target: "pred-1" },
-  { id: "e-nb1-pred3", source: "newbranch-1", target: "pred-3" },
-  { id: "e-b3-pred4", source: "branch-2", target: "pred-4" },
 ];
 
 export { sampleNodes, sampleEdges };

@@ -1,11 +1,6 @@
 import { memo, useMemo } from "react";
 import { BaseEdge, getStraightPath, useInternalNode } from "@xyflow/react";
 
-/**
- * Straight edge from the source circle’s rim to the target circle’s rim,
- * along the line between centers — so the line meets the node at the
- * correct angle, not only at left/right handle points.
- */
 function CircleIntersectEdge({
   id,
   source,
