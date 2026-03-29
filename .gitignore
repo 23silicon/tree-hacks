@@ -6,3 +6,45 @@ enriched_output.json
 final_output.json
 topic_*.json
 .env
+sentiment-tree/.env
+sentiment-tree/__pycache__/
+sentiment-tree/pipeline/__pycache__/
+sentiment-tree/chroma_data/
+sentiment-tree/*.egg-info/
+.vscode/
+.pytest_cache
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables / secrets
+.env
+.env.*
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-error.log*
+
+# Build output
+*.log
