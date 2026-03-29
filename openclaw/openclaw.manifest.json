@@ -1,0 +1,22 @@
+{
+  "name": "sentimentree-openclaw-compat",
+  "version": "0.3.0",
+  "mode": "planning-dry-run",
+  "capabilities": [
+    "contract-discovery",
+    "sentiment-enrichment",
+    "timeline-branching",
+    "prediction-overlay"
+  ],
+  "entrypoints": {
+    "ingest": "openclaw/contracts/pipeline-input.schema.json",
+    "emit": "openclaw/contracts/pipeline-output.schema.json"
+  },
+  "policy": {
+    "writeScope": [
+      "openclaw/",
+      ".github/agents/"
+    ],
+    "requiresHumanApprovalOutsideScope": true
+  }
+}
