@@ -3,40 +3,91 @@ import {
   forceLink,
   forceManyBody,
   forceCollide,
-  forceX,
   forceY,
 } from "d3-force";
 
+export const LINK_DISTANCE = 140;
+export const LINK_DRAG_DISTANCE_FACTOR = 1.12;
+export const LINK_REST_STRENGTH = 0.9;
+export const LINK_DRAG_STRENGTH = 0.55;
+
+export function setLinkPhysics(simulation, mode) {
+  const link = simulation.force("link");
+  if (!link) return;
+  if (mode === "drag") {
+    link.distance(LINK_DISTANCE * LINK_DRAG_DISTANCE_FACTOR);
+    link.strength(LINK_DRAG_STRENGTH);
+  } else {
+    link.distance(LINK_DISTANCE);
+    link.strength(LINK_REST_STRENGTH);
+  }
+}
+
 /**
- * Runs a d3-force simulation and returns a map of { [nodeId]: { x, y } }.
+ * Creates the force simulation.
  *
- * Layout strategy:
- *   x-axis → time   (earliest node left, latest right)
- *   y-axis → sentiment  (1 = top / bullish, 0 = bottom / bearish)
- *   Forces nudge nodes apart so labels don't overlap while respecting
- *   the time + sentiment anchors.
+ * Initial positions:
+ *   root       → canvas center
+ *   descendant → fan below root (increasing y)
+ *   prediction → fan above root (decreasing y)
+ *   branch / newBranch → scattered around center
+ *
+ * Persistent forces:
+ *   descendants get a mild forceY pulling them toward cy + 200
+ *   everything else: no positional anchor — fully free
  */
-export default function forceLayout(nodes, edges, width = 1400, height = 800) {
-  const PADDING = 80;
+export function createLayout(graphNodes, graphEdges, width, height) {
+  const cx = width / 2;
+  const cy = height / 2;
 
-  const timestamps = nodes.map((n) => new Date(n.data.timestamp).getTime());
-  const tMin = Math.min(...timestamps);
-  const tMax = Math.max(...timestamps);
-  const tRange = tMax - tMin || 1;
+  const descIds = graphNodes
+    .filter((n) => n.data?.category === "descendant")
+    .map((n) => n.id);
+  const predIds = graphNodes
+    .filter((n) => n.data?.category === "prediction")
+    .map((n) => n.id);
 
-  const simNodes = nodes.map((n) => {
-    const t = new Date(n.data.timestamp).getTime();
-    return {
-      id: n.id,
-      // anchor positions based on time (x) and sentiment (y)
-      tx: PADDING + ((t - tMin) / tRange) * (width - PADDING * 2),
-      ty: PADDING + (1 - n.data.sentiment) * (height - PADDING * 2),
-      x: PADDING + ((t - tMin) / tRange) * (width - PADDING * 2),
-      y: PADDING + (1 - n.data.sentiment) * (height - PADDING * 2),
-    };
+  const simNodes = graphNodes.map((node) => {
+    const cat = node.data?.category ?? "branch";
+    let x, y;
+
+    if (node.id === "root") {
+      x = cx;
+      y = cy;
+    } else if (cat === "descendant") {
+      const idx = descIds.indexOf(node.id);
+      const total = descIds.length;
+      const spread = Math.min(300, total * 80);
+      x = cx + (total > 1 ? (idx / (total - 1) - 0.5) * spread : 0);
+      y = cy + 160 + idx * 70;
+    } else if (cat === "prediction") {
+      const idx = predIds.indexOf(node.id);
+      const total = predIds.length;
+      const spread = Math.min(400, total * 90);
+      x = cx + (total > 1 ? (idx / (total - 1) - 0.5) * spread : 0);
+      y = cy - 200;
+    } else {
+      // branch / newBranch — orbit around center
+      const count = graphNodes.filter(
+        (n) => n.data?.category === "branch" || n.data?.category === "newBranch"
+      ).length;
+      const branchIds = graphNodes
+        .filter(
+          (n) =>
+            n.data?.category === "branch" || n.data?.category === "newBranch"
+        )
+        .map((n) => n.id);
+      const idx = branchIds.indexOf(node.id);
+      const angle = (idx / Math.max(count, 1)) * 2 * Math.PI;
+      const r = 160;
+      x = cx + Math.cos(angle) * r;
+      y = cy + Math.sin(angle) * r;
+    }
+
+    return { id: node.id, category: cat, x, y, vx: 0, vy: 0 };
   });
 
-  const simEdges = edges.map((e) => ({
+  const simLinks = graphEdges.map((e) => ({
     source: e.source,
     target: e.target,
   }));
@@ -44,30 +95,31 @@ export default function forceLayout(nodes, edges, width = 1400, height = 800) {
   const simulation = forceSimulation(simNodes)
     .force(
       "link",
-      forceLink(simEdges)
+      forceLink(simLinks)
         .id((d) => d.id)
-        .distance(120)
-        .strength(0.3)
+        .distance(LINK_DISTANCE)
+        .strength(LINK_REST_STRENGTH)
     )
-    .force("charge", forceManyBody().strength(-200))
-    .force("collide", forceCollide(50))
+    .force("charge", forceManyBody().strength(-500))
+    .force("collide", forceCollide(52))
+    // mild downward pull for descendants keeps them naturally below root
     .force(
-      "x",
-      forceX((d) => d.tx).strength(0.7)
+      "descendantY",
+      forceY((d) => (d.category === "descendant" ? cy + 220 : cy)).strength(
+        (d) => (d.category === "descendant" ? 0.12 : 0)
+      )
     )
-    .force(
-      "y",
-      forceY((d) => d.ty).strength(0.7)
-    )
-    .stop();
+    .velocityDecay(0.55)
+    .alphaDecay(0.022);
 
-  // run synchronously for a fixed number of ticks
-  const TICKS = 120;
-  for (let i = 0; i < TICKS; i++) simulation.tick();
+  return { simulation, simNodes };
+}
 
-  const positions = {};
-  for (const n of simNodes) {
-    positions[n.id] = { x: n.x, y: n.y };
+export function settleSimulation(simulation, maxTicks = 500) {
+  let ticks = 0;
+  simulation.alpha(1);
+  while (simulation.alpha() > 0.001 && ticks < maxTicks) {
+    simulation.tick();
+    ticks++;
   }
-  return positions;
 }

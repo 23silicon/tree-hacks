@@ -51,7 +51,12 @@ function SentimentNode({ data }) {
         justifyContent: "center",
       }}
     >
-      <Handle type="target" position={Position.Left} style={{ opacity: 0 }} />
+      <Handle
+        type="target"
+        position={Position.Top}
+        isConnectable={false}
+        style={{ opacity: 0, pointerEvents: "none", width: 1, height: 1 }}
+      />
 
       <div
         style={{
@@ -131,7 +136,12 @@ function SentimentNode({ data }) {
         </div>
       )}
 
-      <Handle type="source" position={Position.Right} style={{ opacity: 0 }} />
+      <Handle
+        type="source"
+        position={Position.Top}
+        isConnectable={false}
+        style={{ opacity: 0, pointerEvents: "none", width: 1, height: 1 }}
+      />
     </div>
   );
 }

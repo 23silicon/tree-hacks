@@ -153,6 +153,30 @@ const sampleNodes = [
         "Future data release — branches may converge on recession call here.",
     },
   },
+  {
+    id: "pred-3",
+    data: {
+      label: "Unemployment hits 5%?",
+      category: "prediction",
+      sentiment: 0.33,
+      source: "kalshi",
+      timestamp: "2026-08-14T12:00:00Z",
+      summary:
+        "Kalshi contract on U-3 unemployment crossing 5% before year-end — bearish labor signal.",
+    },
+  },
+  {
+    id: "pred-4",
+    data: {
+      label: "S&P 500 correction >15%",
+      category: "prediction",
+      sentiment: 0.28,
+      source: "polymarket",
+      timestamp: "2026-09-30T16:00:00Z",
+      summary:
+        "Polymarket contract on a peak-to-trough drawdown exceeding 15% before Q4 close.",
+    },
+  },
 ];
 
 const sampleEdges = [
@@ -175,6 +199,8 @@ const sampleEdges = [
   { id: "e-b2-pred1", source: "branch-2", target: "pred-1" },
   { id: "e-nb2-pred2", source: "newbranch-2", target: "pred-2" },
   { id: "e-b3-pred1", source: "branch-3", target: "pred-1" },
+  { id: "e-nb1-pred3", source: "newbranch-1", target: "pred-3" },
+  { id: "e-b3-pred4", source: "branch-2", target: "pred-4" },
 ];
 
 export { sampleNodes, sampleEdges };
