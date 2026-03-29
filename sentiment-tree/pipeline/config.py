@@ -9,10 +9,10 @@ class PipelineConfig:
     """Central configuration for the embedding pipeline."""
 
     # Embedding
-    embedding_model: str = "all-MiniLM-L6-v2"
+    embedding_model: str = "BAAI/bge-small-en-v1.5"
 
     # Relevance filtering
-    relevance_threshold: float = 0.25
+    relevance_threshold: float = 0.55
 
     # Sentiment scoring (zero-shot classification)
     sentiment_model: str = "facebook/bart-large-mnli"
