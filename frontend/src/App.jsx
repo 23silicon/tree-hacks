@@ -444,7 +444,7 @@ export default function App() {
         `Live graph: ${payload?.summary?.posts ?? 0} sources, ${payload?.summary?.predictions ?? 0} predictions, ${payload?.summary?.events ?? 0} events.`
       );
       scheduleRefresh(query, controller);
-    } catch (err) {
+    } catch {
       if (controller.signal.aborted) {
         return false;
       }

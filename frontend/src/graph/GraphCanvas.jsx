@@ -149,8 +149,7 @@ function buildFlowEdges(
   graphNodes,
   graphEdges,
   visibleIds,
-  activePredictionId = null,
-  activeEventIds = new Set()
+  activePredictionId = null
 ) {
   return graphEdges.map((e) => {
     const sourceNode = graphNodes.find((n) => n.id === e.source);
@@ -163,9 +162,7 @@ function buildFlowEdges(
       relation === "prediction" ||
       (sourceNode?.id === "root" && targetCategory === "prediction");
     const visible = visibleIds.has(e.source) && visibleIds.has(e.target);
-    const focusedVisible = !activePredictionId
-      ? visible
-      : visible;
+    const focusedVisible = visible;
     const opacity = !visible
       ? 0
       : activePredictionId
@@ -747,8 +744,18 @@ function DetailsSidebar({ details, onClose }) {
 export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
   const graph = payload?.graph;
   const graphNodes = graph?.nodes?.length ? graph.nodes : sampleNodes;
-  const graphEdges = Array.isArray(graph?.edges) ? graph.edges : sampleEdges;
-  const supportEdges = Array.isArray(graph?.support_edges) ? graph.support_edges : [];
+  const graphEdges = useMemo(
+    () => (Array.isArray(graph?.edges) ? graph.edges : sampleEdges),
+    [graph]
+  );
+  const supportEdges = useMemo(
+    () => (Array.isArray(graph?.support_edges) ? graph.support_edges : []),
+    [graph]
+  );
+  const layoutGraphEdges = useMemo(
+    () => [...graphEdges, ...supportEdges],
+    [graphEdges, supportEdges]
+  );
   const allGraphNodeIds = useMemo(
     () => new Set(graphNodes.map((node) => node.id)),
     [graphNodes]
@@ -912,15 +919,15 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
     supportEdges,
   ]);
 
-  const simBundleRef = useRef(null);
-  if (simBundleRef.current === null) {
-    simBundleRef.current = initSimulationBundle(
-      graphNodes,
-      graphEdges,
-      layoutParamsRef
-    );
-  }
-  const { simulation, simNodes, predIdSet } = simBundleRef.current;
+  const { simulation, simNodes, predIdSet } = useMemo(
+    () =>
+      initSimulationBundle(
+        graphNodes,
+        layoutGraphEdges,
+        layoutParamsRef
+      ),
+    [graphNodes, layoutGraphEdges]
+  );
 
   const initialNodes = useMemo(
     () =>
@@ -943,13 +950,12 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
   );
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(
-    buildFlowEdges(
-      graphNodes,
-      displayGraphEdges,
-      allGraphNodeIds,
-      activePredictionId,
-      activeEventIds
-    )
+      buildFlowEdges(
+        graphNodes,
+        displayGraphEdges,
+        allGraphNodeIds,
+        activePredictionId
+      )
   );
 
   const draggingRef = useRef(null);
@@ -989,7 +995,7 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
     [focusedPositionMap, setNodes, simNodes]
   );
 
-  const tickLoop = useCallback(() => {
+  const tickLoop = useCallback(function tickFrame() {
     const cx = CANVAS_W / 2;
     const cy = CANVAS_H / 2;
     const root = simNodes.find((s) => s.id === "root");
@@ -1040,12 +1046,18 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
       draggingRef.current === "root";
 
     if (keepGoing) {
-      rafRef.current = requestAnimationFrame(tickLoop);
+      rafRef.current = requestAnimationFrame(tickFrame);
     } else {
       rafRef.current = null;
       simulation.stop();
     }
   }, [simulation, applySimPositions, simNodes]);
+
+  useEffect(() => {
+    return () => {
+      simulation.stop();
+    };
+  }, [simulation]);
 
   useEffect(() => {
     return () => {
@@ -1069,8 +1081,7 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
         graphNodes,
         displayGraphEdges,
         allGraphNodeIds,
-        activePredictionId,
-        activeEventIds
+        activePredictionId
       )
     );
   }, [
@@ -1101,8 +1112,7 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
         graphNodes,
         displayGraphEdges,
         allGraphNodeIds,
-        activePredictionId,
-        activeEventIds
+        activePredictionId
       )
     );
   }, [
@@ -1252,8 +1262,7 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
           graphNodes,
           displayGraphEdges,
           visible,
-          activePredictionId,
-          activeEventIds
+          activePredictionId
         )
       );
     };

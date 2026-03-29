@@ -151,7 +151,6 @@ export function getEventLaneTargets(graphNodes, width, height, radiusPx) {
     cy,
     effectivePredictionRadius
   );
-  const predictionIds = [...predictionTargets.keys()];
 
   const fallbackBranchKeys = [];
   const fallbackSeen = new Set();
