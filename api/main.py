@@ -3307,7 +3307,11 @@ def build_live_workflow_streaming_response(
 ) -> StreamingResponse:
     async def event_stream():
         startup_warnings = list(getattr(app.state, "startup_warnings", []))
-        accumulated_posts: list[SourcedPost] = []
+        try:
+            accumulated_posts = load_cached_posts(request.query)
+        except Exception as exc:
+            startup_warnings.append(f"source cache unavailable: {exc}")
+            accumulated_posts = []
         accumulated_predictions: list[Prediction] = []
         prediction_source = "pending"
 
@@ -3327,10 +3331,14 @@ def build_live_workflow_streaming_response(
                 "stage": "initial",
                 "data": build_workflow_payload(
                     request=request,
-                    posts=[],
+                    posts=accumulated_posts,
                     predictions=[],
                     prediction_source=prediction_source,
-                    bridge_result=build_bridge_stub([], request.max_descendants, request.query),
+                    bridge_result=build_bridge_stub(
+                        accumulated_posts,
+                        request.max_descendants,
+                        request.query,
+                    ),
                     warnings=startup_warnings,
                     stream_state={
                         "mode": "live",
@@ -3360,23 +3368,155 @@ def build_live_workflow_streaming_response(
             )
 
             existing_post_keys = {post_dedupe_key(post) for post in accumulated_posts}
-            cycle_posts, source_warnings, news_terms = await collect_posts(
+            seen_post_keys = set(existing_post_keys)
+            total_new_posts = 0
+            source_jobs, source_warnings, news_terms = build_post_collection_jobs(
                 request.query,
                 include_social=request.include_social,
                 bluesky_seconds=request.bluesky_seconds,
                 existing_posts=accumulated_posts,
             )
-            new_posts_count = sum(
-                1 for post in cycle_posts if post_dedupe_key(post) not in existing_post_keys
+            source_warnings_combined = [*startup_warnings, *source_warnings]
+            cycle_live_posts: list[SourcedPost] = []
+            yield ndjson_line(
+                {
+                    "type": "status",
+                    "status": "sources_started",
+                    "mode": "live",
+                    "iteration": iteration,
+                    "jobs": len(source_jobs),
+                    "news_terms": news_terms,
+                    "posts": len(accumulated_posts),
+                    "fetched_at": utc_now_iso(),
+                }
             )
-            accumulated_posts = merge_posts([accumulated_posts, cycle_posts])
+
+            if source_jobs:
+                async def run_source_job(label: str, coroutine: Any) -> tuple[str, Any, Exception | None]:
+                    try:
+                        return label, await coroutine, None
+                    except Exception as exc:  # pragma: no cover - passthrough for stream status
+                        return label, [], exc
+
+                source_tasks = [
+                    asyncio.create_task(run_source_job(label, coroutine))
+                    for label, coroutine in source_jobs
+                ]
+                for completed_task in asyncio.as_completed(source_tasks):
+                    label, result, source_error = await completed_task
+                    if source_error is not None:
+                        source_warnings.append(f"{label} fetch failed: {source_error}")
+                        source_warnings_combined = [*startup_warnings, *source_warnings]
+                        yield ndjson_line(
+                            {
+                                "type": "status",
+                                "status": "source_batch_failed",
+                                "mode": "live",
+                                "iteration": iteration,
+                                "label": label,
+                                "warnings": [f"{label} fetch failed: {source_error}"],
+                                "posts": len(accumulated_posts),
+                                "fetched_at": utc_now_iso(),
+                            }
+                        )
+                        continue
+
+                    batch_posts: list[SourcedPost] = []
+                    batch_new_posts = 0
+                    for item in result:
+                        post = normalize_source_post(item)
+                        if post is None:
+                            continue
+                        batch_posts.append(post)
+                        key = post_dedupe_key(post)
+                        if key not in seen_post_keys:
+                            seen_post_keys.add(key)
+                            batch_new_posts += 1
+
+                    if batch_posts:
+                        cycle_live_posts = merge_posts([cycle_live_posts, batch_posts])
+                        accumulated_posts = merge_posts([accumulated_posts, batch_posts])
+                        total_new_posts += batch_new_posts
+
+                    source_bridge = build_bridge_stub(
+                        accumulated_posts,
+                        request.max_descendants,
+                        request.query,
+                    )
+                    yield ndjson_line(
+                        {
+                            "type": "status",
+                            "status": "source_batch",
+                            "mode": "live",
+                            "iteration": iteration,
+                            "label": label,
+                            "new_posts": batch_new_posts,
+                            "total_new_posts": total_new_posts,
+                            "posts": len(accumulated_posts),
+                            "warnings": source_warnings,
+                            "fetched_at": utc_now_iso(),
+                        }
+                    )
+                    yield ndjson_line(
+                        {
+                            "type": "snapshot",
+                            "stage": "sources",
+                            "data": build_workflow_payload(
+                                request=request,
+                                posts=accumulated_posts,
+                                predictions=accumulated_predictions,
+                                prediction_source=prediction_source,
+                                bridge_result=source_bridge,
+                                warnings=source_warnings_combined,
+                                stream_state={
+                                    "mode": "live",
+                                    "stage": "sources",
+                                    "iteration": iteration,
+                                    "new_posts": total_new_posts,
+                                    "latest_source_batch_posts": batch_new_posts,
+                                    "poll_interval_seconds": request.poll_interval_seconds,
+                                    "news_terms": news_terms,
+                                    "source_batch_label": label,
+                                },
+                            ),
+                        }
+                    )
+
+            try:
+                store_posts_in_cache(request.query, cycle_live_posts)
+                cached_posts = load_cached_posts(request.query)
+            except Exception as exc:
+                source_warnings.append(f"source cache unavailable: {exc}")
+                source_warnings_combined = [*startup_warnings, *source_warnings]
+                cached_posts = []
+
+            if cached_posts:
+                live_post_keys = {post_dedupe_key(post) for post in accumulated_posts}
+                cached_only_posts = [
+                    post for post in cached_posts if post_dedupe_key(post) not in live_post_keys
+                ]
+                if cached_only_posts:
+                    cached_only_count = len(cached_only_posts)
+                    accumulated_posts = merge_posts([accumulated_posts, cached_only_posts])
+                    total_new_posts += cached_only_count
+                    yield ndjson_line(
+                        {
+                            "type": "status",
+                            "status": "historical_context_loaded",
+                            "mode": "live",
+                            "iteration": iteration,
+                            "posts": len(accumulated_posts),
+                            "historical_posts": cached_only_count,
+                            "total_new_posts": total_new_posts,
+                            "fetched_at": utc_now_iso(),
+                        }
+                    )
 
             source_bridge = build_bridge_stub(
                 accumulated_posts,
                 request.max_descendants,
                 request.query,
             )
-            source_warnings_combined = [*startup_warnings, *source_warnings]
             yield ndjson_line(
                 {
                     "type": "status",
@@ -3384,7 +3524,7 @@ def build_live_workflow_streaming_response(
                     "mode": "live",
                     "iteration": iteration,
                     "posts": len(accumulated_posts),
-                    "new_posts": new_posts_count,
+                    "new_posts": total_new_posts,
                     "news_terms": news_terms,
                     "warnings": source_warnings,
                     "fetched_at": utc_now_iso(),
@@ -3405,7 +3545,7 @@ def build_live_workflow_streaming_response(
                             "mode": "live",
                             "stage": "sources",
                             "iteration": iteration,
-                            "new_posts": new_posts_count,
+                            "new_posts": total_new_posts,
                             "poll_interval_seconds": request.poll_interval_seconds,
                             "news_terms": news_terms,
                         },
@@ -3464,7 +3604,7 @@ def build_live_workflow_streaming_response(
                             "mode": "live",
                             "stage": "predictions",
                             "iteration": iteration,
-                            "new_posts": new_posts_count,
+                            "new_posts": total_new_posts,
                             "new_predictions": new_predictions_count,
                             "poll_interval_seconds": request.poll_interval_seconds,
                             "news_terms": news_terms,
@@ -3504,7 +3644,7 @@ def build_live_workflow_streaming_response(
                     "mode": "live",
                     "stage": "analysis",
                     "iteration": iteration,
-                    "new_posts": new_posts_count,
+                    "new_posts": total_new_posts,
                     "new_predictions": new_predictions_count,
                     "poll_interval_seconds": request.poll_interval_seconds,
                     "news_terms": news_terms,

@@ -113,6 +113,11 @@ async function parseNdjsonStream(response, handlers) {
 }
 
 export async function streamWorkflow(query, handlers = {}) {
+  const workflowOptions = handlers.workflowOptions ?? {};
+  const pollIntervalSeconds =
+    handlers.pollIntervalSeconds
+    ?? workflowOptions.poll_interval_seconds
+    ?? 12;
   const response = await fetch(`${API_BASE}/workflow/live/stream`, {
     method: "POST",
     headers: {
@@ -121,7 +126,8 @@ export async function streamWorkflow(query, handlers = {}) {
     body: JSON.stringify({
       query,
       ...DEFAULT_WORKFLOW_OPTIONS,
-      poll_interval_seconds: 12,
+      ...workflowOptions,
+      poll_interval_seconds: pollIntervalSeconds,
     }),
     signal: handlers.signal,
   });

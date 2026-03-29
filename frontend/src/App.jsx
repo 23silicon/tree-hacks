@@ -3,7 +3,7 @@ import GraphCanvas from "./graph/GraphCanvas";
 import LandingPage from "./LandingPage";
 import SourceStreamPanel from "@/components/SourceStreamPanel";
 import { GooeySearchBar } from "@/components/ui/animated-search-bar";
-import { runWorkflow, streamPredictionSearch, streamWorkflowRun } from "@/lib/api";
+import { runWorkflow, streamPredictionSearch, streamWorkflow, streamWorkflowRun } from "@/lib/api";
 
 function createPlaceholderPayload(query) {
   const timestamp = new Date().toISOString();
@@ -236,6 +236,10 @@ const INITIAL_WORKFLOW_OPTIONS = {
   prediction_limit: 10,
   max_descendants: 28,
 };
+const LIVE_WORKFLOW_OPTIONS = {
+  ...INITIAL_WORKFLOW_OPTIONS,
+  poll_interval_seconds: 6,
+};
 
 export default function App() {
   const [showGraph, setShowGraph] = useState(false);
@@ -270,38 +274,121 @@ export default function App() {
     }
   };
 
-  const scheduleRefresh = (query, controller) => {
-    pollTimerRef.current = setTimeout(async () => {
-      if (requestAbortRef.current !== controller || controller.signal.aborted) {
-        return;
-      }
+  const updateWorkflowMessage = (event, continuous = false) => {
+    if (event.status === "started") {
+      setStreamMessage(continuous ? "Opening continuous source stream..." : "Opening workflow stream...");
+      return;
+    }
+    if (event.status === "cycle_started") {
+      setStreamMessage("Continuing to scrape sources...");
+      return;
+    }
+    if (event.status === "sources_started") {
+      setStreamMessage(
+        continuous
+          ? "Continuing to pull sources from Google News, RSS, Reddit, Bluesky, and Hacker News..."
+          : "Pulling sources from Google News, RSS, Reddit, Bluesky, and Hacker News..."
+      );
+      return;
+    }
+    if (event.status === "source_batch") {
+      const label = String(event.label || "source")
+        .replace(/^google_news:/, "Google News: ")
+        .replace(/^hackernews:/, "Hacker News: ")
+        .replace(/^rss$/, "RSS feeds")
+        .replace(/^reddit$/, "Reddit");
+      setStreamMessage(
+        `${continuous ? "Continuing to pull sources" : "Pulling sources"}... ${event.posts ?? 0} collected after ${label}.`
+      );
+      return;
+    }
+    if (event.status === "sources_collected") {
+      setStreamMessage(
+        `${continuous ? "Updated source pool" : "Collected"} ${event.posts ?? 0} sources. Matching prediction markets...`
+      );
+      return;
+    }
+    if (event.status === "historical_context_loaded") {
+      setStreamMessage(
+        `Loaded ${event.historical_posts ?? 0} older context items from local cache.`
+      );
+      return;
+    }
+    if (event.status === "predictions_ready") {
+      setStreamMessage(
+        `${continuous ? "Updated" : "Matched"} ${event.predictions ?? 0} prediction markets. Building event chain...`
+      );
+      return;
+    }
+    if (event.status === "sentiment_tree_complete") {
+      setStreamMessage(`Linking ${event.events ?? 0} events into the timeline...`);
+      return;
+    }
+    if (event.status === "cycle_complete") {
+      setStreamMessage(
+        `Live graph: ${event.posts ?? 0} sources, ${event.predictions ?? 0} predictions, ${event.events ?? 0} events. Continuing to scrape...`
+      );
+    }
+  };
 
-      setStreamMessage("Refreshing graph...");
-      try {
-        const payload = await runWorkflow(query, {
-          signal: controller.signal,
-          workflowOptions: INITIAL_WORKFLOW_OPTIONS,
-        });
-        if (requestAbortRef.current !== controller || controller.signal.aborted) {
-          return;
-        }
-        setGraphPayload(payload);
-        setSourceFeedPayload(payload);
-        setStreamMessage(
-          `Live graph: ${payload?.summary?.posts ?? 0} sources, ${payload?.summary?.predictions ?? 0} predictions, ${payload?.summary?.events ?? 0} events.`
-        );
-      } catch (err) {
-        if (controller.signal.aborted) {
-          return;
-        }
-        setError(err instanceof Error ? err.message : "Refresh failed.");
-        setStreamMessage("Auto-refresh failed.");
-      }
+  const startContinuousUpdates = (query, controller) => {
+    const runLoop = async () => {
+      while (requestAbortRef.current === controller && !controller.signal.aborted) {
+        try {
+          await streamWorkflow(query, {
+            signal: controller.signal,
+            workflowOptions: LIVE_WORKFLOW_OPTIONS,
+            onStatus: (event) => {
+              if (requestAbortRef.current !== controller || controller.signal.aborted) {
+                return;
+              }
+              updateWorkflowMessage(event, true);
+            },
+            onSnapshot: (data, event) => {
+              if (requestAbortRef.current !== controller || controller.signal.aborted) {
+                return;
+              }
 
-      if (requestAbortRef.current === controller && !controller.signal.aborted) {
-        scheduleRefresh(query, controller);
+              const stage = event?.stage || data?.stream?.stage || "initial";
+              if (stage === "initial") {
+                return;
+              }
+
+              const predictionSeed =
+                Array.isArray(data?.sources?.predictions) && data.sources.predictions.length > 0
+                  ? data.sources.predictions
+                  : Array.isArray(latestWorkflowPayloadRef.current?.sources?.predictions)
+                    ? latestWorkflowPayloadRef.current.sources.predictions
+                    : latestPredictionBatchRef.current;
+
+              latestWorkflowPayloadRef.current = data;
+              workflowStageRef.current = stage;
+              setSourceFeedPayload(data);
+
+              if (stage === "analysis" || stage === "complete" || stage === "predictions") {
+                setGraphPayload(data);
+                return;
+              }
+
+              setGraphPayload(
+                mergePredictionsIntoPayload(data, predictionSeed) || data
+              );
+            },
+          });
+          return;
+        } catch {
+          if (controller.signal.aborted || requestAbortRef.current !== controller) {
+            return;
+          }
+          setStreamMessage("Live source stream disconnected. Reconnecting...");
+          await new Promise((resolve) => {
+            pollTimerRef.current = setTimeout(resolve, WORKFLOW_REFRESH_MS / 5);
+          });
+        }
       }
-    }, WORKFLOW_REFRESH_MS);
+    };
+
+    void runLoop();
   };
 
   const handleSearch = async (query) => {
@@ -370,45 +457,7 @@ export default function App() {
           if (requestAbortRef.current !== controller || controller.signal.aborted) {
             return;
           }
-
-          if (event.status === "started") {
-            setStreamMessage("Opening workflow stream...");
-            return;
-          }
-          if (event.status === "sources_started") {
-            setStreamMessage("Pulling sources from Google News, RSS, Reddit, Bluesky, and Hacker News...");
-            return;
-          }
-          if (event.status === "source_batch") {
-            const label = String(event.label || "source")
-              .replace(/^google_news:/, "Google News: ")
-              .replace(/^hackernews:/, "Hacker News: ")
-              .replace(/^rss$/, "RSS feeds")
-              .replace(/^reddit$/, "Reddit");
-            setStreamMessage(`Pulling sources... ${event.posts ?? 0} collected after ${label}.`);
-            return;
-          }
-          if (event.status === "sources_collected") {
-            setStreamMessage(`Collected ${event.posts ?? 0} sources. Matching prediction markets...`);
-            return;
-          }
-          if (event.status === "historical_context_loaded") {
-            setStreamMessage(
-              `Loaded ${event.historical_posts ?? 0} older context items from local cache.`
-            );
-            return;
-          }
-          if (event.status === "predictions_ready") {
-            setStreamMessage(
-              `Matched ${event.predictions ?? 0} prediction markets. Building event chain...`
-            );
-            return;
-          }
-          if (event.status === "sentiment_tree_complete") {
-            setStreamMessage(
-              `Linking ${event.events ?? 0} events into the timeline...`
-            );
-          }
+          updateWorkflowMessage(event, false);
         },
         onSnapshot: (data, event) => {
           if (requestAbortRef.current !== controller || controller.signal.aborted) {
@@ -439,11 +488,10 @@ export default function App() {
         setGraphPayload(payload);
         setSourceFeedPayload(payload);
       }
-      setIsWorkflowLoading(false);
       setStreamMessage(
-        `Live graph: ${payload?.summary?.posts ?? 0} sources, ${payload?.summary?.predictions ?? 0} predictions, ${payload?.summary?.events ?? 0} events.`
+        `Live graph: ${payload?.summary?.posts ?? 0} sources, ${payload?.summary?.predictions ?? 0} predictions, ${payload?.summary?.events ?? 0} events. Continuing to scrape...`
       );
-      scheduleRefresh(query, controller);
+      startContinuousUpdates(query, controller);
     } catch {
       if (controller.signal.aborted) {
         return false;
@@ -462,11 +510,10 @@ export default function App() {
         workflowStageRef.current = "complete";
         setGraphPayload(payload);
         setSourceFeedPayload(payload);
-        setIsWorkflowLoading(false);
         setStreamMessage(
-          `Live graph: ${payload?.summary?.posts ?? 0} sources, ${payload?.summary?.predictions ?? 0} predictions, ${payload?.summary?.events ?? 0} events.`
+          `Live graph: ${payload?.summary?.posts ?? 0} sources, ${payload?.summary?.predictions ?? 0} predictions, ${payload?.summary?.events ?? 0} events. Continuing to scrape...`
         );
-        scheduleRefresh(query, controller);
+        startContinuousUpdates(query, controller);
       } catch (fallbackErr) {
         if (controller.signal.aborted) {
           return false;
