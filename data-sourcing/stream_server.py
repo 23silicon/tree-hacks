@@ -21,6 +21,7 @@ import xml.etree.ElementTree as ET
 import httpx
 import websockets
 from websockets.asyncio.server import serve
+from aggregator import aggregator_loop
 
 # ============================================================
 # CONNECTIONS
@@ -660,11 +661,12 @@ async def main(topic: str, port: int = 8765):
         print(f"\n[INIT] Done — {len(ALL_DATA)} total items streamed")
         print(f"[INIT] Entering continuous mode\n")
 
-        # 持续运行：新闻轮询 + Reddit轮询 + Bluesky实时
+        # 持续运行：新闻轮询 + Reddit轮询 + Bluesky实时 + 话题聚合
         await asyncio.gather(
             poll_loop(topic, interval=45),
             reddit_loop(topic),
             bluesky_loop(topic),
+            aggregator_loop(ALL_DATA, broadcast, interval=30),
         )
 
 
