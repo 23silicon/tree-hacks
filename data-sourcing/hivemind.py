@@ -93,6 +93,15 @@ def search(query: str, include_sentiment: bool = True) -> dict:
         if include_sentiment and HAS_ANTHROPIC and relevant:
             result = await analyze_topic_with_sentiment(query, relevant)
             if result:
+                # Also run enrichment (events, entities, contradictions)
+                enrichment = await enrich_data(relevant)
+                result["enrichment"] = {
+                    "events": enrichment.get("events", []),
+                    "entities": enrichment.get("entities", {}),
+                    "contradictions": enrichment.get("contradictions", []),
+                    "stats": enrichment.get("stats", {}),
+                    "top_stories": enrichment.get("top_stories", []),
+                }
                 return result
 
         # Fallback: return items without sentiment
