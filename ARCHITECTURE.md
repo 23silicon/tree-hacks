@@ -284,3 +284,14 @@ Communication via `sessions_send`:
 - Narrative Weaver → Frontend: "here's the graph JSON"
 
 Lobster pipeline orchestrates the full flow in one command.
+
+## Repository Runtime Realization
+
+In this repository, the above OpenClaw orchestration is realized through a local API-first execution loop:
+
+- Frontend issues local `/api` workflow requests.
+- FastAPI serves as the conductor for source collection, enrichment, and graph assembly.
+- Workflow and prediction endpoints provide both single-response and streaming modes.
+- OpenClaw manifest and contracts remain the canonical interface definition for ingest and emit payloads.
+
+This preserves OpenClaw compatibility while enabling reliable local development and demo execution.

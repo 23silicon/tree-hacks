@@ -8,6 +8,15 @@ It can:
 - call into `sentiment-tree/` when that stack is installed
 - return graph-ready payloads for the frontend
 
+## OpenClaw Runtime Alignment
+
+This API is the execution engine for the repository's OpenClaw-compatible workflow model.
+
+- OpenClaw contracts define canonical ingest and emit payload shapes.
+- The frontend triggers local workflow execution through this service.
+- This service orchestrates scraping, prediction retrieval, enrichment, and graph construction.
+- Returned payloads are structured to map cleanly onto `openclaw/contracts/` schemas.
+
 ## Shared Python Environment
 
 Use one repo-level virtual environment for `api/`, `data-sourcing/`, and `sentiment-tree/`:
@@ -61,6 +70,8 @@ The response includes:
 - `sources.affinity_results`
 - `graph.nodes`
 - `graph.edges`
+
+These fields are the runtime evidence that local execution is producing OpenClaw-aligned output artifacts.
 
 ### Streaming NDJSON response
 
