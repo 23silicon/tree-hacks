@@ -1,0 +1,18 @@
+[
+  {
+    "Title": "Iran War Conflict Proceeds",
+  "Description": "Iran War conflicts goes into day 21",
+  "Sources": [
+    {"Source": "Washington Post", "Link": "https://www.washingtonpost.com/", "Summary": "Trump is xyz"}
+  ],
+  "ID": 0
+},
+{
+  "Title": "Ukrain War Conflict Proceeds",
+  "Description": "Ukraine War conflicts goes into day 21",
+  "Sources": [
+    {"Source": "Washington Post", "Link": "https://www.washingtonpost.com/", "Summary": "Iran is xyz"}
+  ],
+  "ID": 1
+  }
+]

@@ -1,0 +1,84 @@
+{
+  "query": "Iran War",
+  "fetched_at": "2025-03-28T14:23:00Z",
+  "predictions": [
+    {
+      "id": "pm_001",
+      "source": "polymarket",
+      "question": "Will the US conduct a military strike on Iran before July 2025?",
+      "category": "military",
+      "yes_probability": 0.34,
+      "no_probability": 0.66,
+      "volume_usd": 4200000,
+      "liquidity_usd": 890000,
+      "closes_at": "2025-07-01T00:00:00Z",
+      "url": "https://polymarket.com/event/us-strike-iran-july-2025",
+      "embedding": null
+    },
+    {
+      "id": "pm_002",
+      "source": "polymarket",
+      "question": "Will Iran conduct a direct attack on Israel in 2025?",
+      "category": "military",
+      "yes_probability": 0.21,
+      "no_probability": 0.79,
+      "volume_usd": 6800000,
+      "liquidity_usd": 1200000,
+      "closes_at": "2025-12-31T00:00:00Z",
+      "url": "https://polymarket.com/event/iran-attack-israel-2025",
+      "embedding": null
+    },
+    {
+      "id": "pm_003",
+      "source": "polymarket",
+      "question": "Will Iran reach a nuclear deal with the US in 2025?",
+      "category": "diplomatic",
+      "yes_probability": 0.18,
+      "no_probability": 0.82,
+      "volume_usd": 3100000,
+      "liquidity_usd": 540000,
+      "closes_at": "2025-12-31T00:00:00Z",
+      "url": "https://polymarket.com/event/iran-nuclear-deal-2025",
+      "embedding": null
+    },
+    {
+      "id": "pm_004",
+      "source": "kalshi",
+      "question": "Will oil prices exceed $120/barrel due to Iran conflict by Q3 2025?",
+      "category": "economic",
+      "yes_probability": 0.27,
+      "no_probability": 0.73,
+      "volume_usd": 1900000,
+      "liquidity_usd": 310000,
+      "closes_at": "2025-09-30T00:00:00Z",
+      "url": "https://kalshi.com/events/iran-oil-120-q3",
+      "embedding": null
+    },
+    {
+      "id": "pm_005",
+      "source": "polymarket",
+      "question": "Will Iran close the Strait of Hormuz in 2025?",
+      "category": "economic",
+      "yes_probability": 0.09,
+      "no_probability": 0.91,
+      "volume_usd": 2400000,
+      "liquidity_usd": 420000,
+      "closes_at": "2025-12-31T00:00:00Z",
+      "url": "https://polymarket.com/event/iran-strait-hormuz-2025",
+      "embedding": null
+    },
+    {
+      "id": "pm_006",
+      "source": "polymarket",
+      "question": "Will the US impose new sanctions on Iran before June 2025?",
+      "category": "diplomatic",
+      "yes_probability": 0.61,
+      "no_probability": 0.39,
+      "volume_usd": 980000,
+      "liquidity_usd": 210000,
+      "closes_at": "2025-06-01T00:00:00Z",
+      "url": "https://polymarket.com/event/us-iran-sanctions-june-2025",
+      "embedding": null
+    }
+  ]
+}
