@@ -1,18 +1,26 @@
-{
-{
-  "Title": "Iran War Conflict Proceeds",
-  "Description": "Iran War conflicts goes into day 21",
-  "Sources": [
-    {"Source": "Washington Post", "Link": "https://www.washingtonpost.com/", "Summary": "Trump is gayy"}
-  ],
-  "ID": 0
-},
-{
-  "Title": "Ukrain War Conflict Proceeds",
-  "Description": "Ukraine War conflicts goes into day 21",
-  "Sources": [
-    {"Source": "Washington Post", "Link": "https://www.washingtonpost.com/", "Summary": "Trump is gayy"}
-  ],
-  "ID": 1
-},
-}
+[
+  {
+    "Title": "Iran War Conflict Proceeds",
+    "Description": "Iran War conflict goes into day 21",
+    "Sources": [
+      {
+        "Source": "Washington Post",
+        "Link": "https://www.washingtonpost.com/",
+        "Summary": "Escalation concerns continue across regional channels."
+      }
+    ],
+    "ID": 0
+  },
+  {
+    "Title": "Ukraine War Conflict Proceeds",
+    "Description": "Ukraine War conflict goes into day 21",
+    "Sources": [
+      {
+        "Source": "Washington Post",
+        "Link": "https://www.washingtonpost.com/",
+        "Summary": "Analysts are tracking prolonged conflict and policy reactions."
+      }
+    ],
+    "ID": 1
+  }
+]
