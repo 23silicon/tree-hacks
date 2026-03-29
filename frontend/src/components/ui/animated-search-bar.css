@@ -58,17 +58,35 @@
   left: auto;
   top: auto;
   transform: none;
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
 .gooey-search .button-content-inner {
-  filter: url(#goo-effect);
+  filter: none;
   cursor: pointer;
   max-width: max-content;
+  position: relative;
+  margin: 0 auto;
+}
+
+.gooey-search.is-expanded .button-content-inner {
+  max-width: none;
+  filter: none;
 }
 
 .gooey-search .search-results {
-  position: relative;
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
   z-index: -1;
+}
+
+.gooey-search.is-expanded .search-results {
+  z-index: 1;
+  top: 198px;
 }
 
 .gooey-search .search-result {
@@ -80,6 +98,13 @@
   position: absolute;
   left: -38px;
   font-size: 14px;
+}
+
+.gooey-search.is-expanded .search-result {
+  left: 0;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background-color: #080808;
 }
 
 .gooey-search .search-result-title {
@@ -113,6 +138,36 @@
   display: flex;
   align-items: center;
   box-sizing: border-box;
+  position: relative;
+  overflow: visible;
+  z-index: 2;
+  justify-content: center;
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 0 8px rgba(255, 255, 255, 0.24))
+    drop-shadow(0 0 16px rgba(255, 255, 255, 0.12));
+  transition:
+    padding 0.35s ease,
+    filter 0.35s ease;
+}
+
+.gooey-search .search-btn::before {
+  content: none;
+}
+
+.gooey-search .search-btn::after {
+  content: none;
+}
+
+.gooey-search.is-expanded .search-btn {
+  align-items: flex-start;
+  padding: 14px 16px 48px;
+  border-radius: 22px;
+  justify-content: center;
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.66))
+    drop-shadow(0 0 10px rgba(255, 255, 255, 0.34))
+    drop-shadow(0 0 22px rgba(255, 255, 255, 0.18));
 }
 
 .gooey-search .search-btn .search-text {
@@ -122,6 +177,10 @@
   left: 4px;
   font-size: 15px;
   line-height: 1.25;
+}
+
+.gooey-search .search-btn .search-text-open {
+  left: 0;
 }
 
 .gooey-search .search-input {
@@ -135,17 +194,60 @@
   min-height: 22px;
 }
 
+.gooey-search .search-input-box {
+  width: 100%;
+  min-height: 92px;
+  resize: none;
+  background-color: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  color: #dddddd;
+  outline: none;
+  font-size: 15px;
+  line-height: 1.45;
+  padding: 11px 12px;
+  box-sizing: border-box;
+}
+
+.gooey-search .search-input-box:focus {
+  border-color: rgba(74, 222, 128, 0.6);
+  box-shadow: 0 0 0 2px rgba(74, 222, 128, 0.16);
+}
+
 .gooey-search .separate-element {
   position: absolute;
   background-color: #000000;
-  width: 52px;
-  height: 52px;
+  width: 44px;
+  height: 44px;
   right: -6px;
-  top: -2px;
+  top: 50%;
+  transform: translateY(-50%);
   display: flex;
   justify-content: center;
   align-items: center;
   border-radius: 9999px;
+  z-index: 6;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.55))
+    drop-shadow(0 0 6px rgba(255, 255, 255, 0.22));
+  transition:
+    opacity 0.24s ease,
+    filter 0.24s ease,
+    top 0.3s ease,
+    left 0.3s ease,
+    right 0.3s ease,
+    bottom 0.3s ease,
+    transform 0.3s ease;
+}
+
+.gooey-search.is-expanded .separate-element {
+  position: absolute;
+  left: auto;
+  right: 10px;
+  top: auto;
+  bottom: -24px;
+  transform: none;
 }
 
 @media (max-width: 767px) {

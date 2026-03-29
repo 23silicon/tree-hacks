@@ -6,10 +6,17 @@ import { cn } from "@/lib/utils";
 const FALL_DURATION_BASE = 92;
 const SWAY_DURATION = 28;
 
+function noise(seed: number) {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
 type LeafPalette = "emerald" | "teal" | "lime" | "green";
+type LeafKind = "classic" | "mimic";
 
 /** Static asset: user-provided 8-bit leaf sprite (`frontend/public/leaf-pixel-template.png`) */
 const LEAF_PIXEL_SPRITE = "/leaf-pixel-template.png";
+const LEAF_PIXEL_MIMIC_SPRITE = "/leaf2.png";
 
 /** CSS filter base per palette — hue/saturation variation; extra hue from `patternIndex` + `leafIndex` */
 const LEAF_PALETTE_FILTER: Record<LeafPalette, string> = {
@@ -28,19 +35,20 @@ type LeafConfig = {
   rotate: number;
   palette: LeafPalette;
   patternIndex: number;
+  kind: LeafKind;
 };
 
 const BASE_LEAVES: LeafConfig[] = [
-  { anchorLeftPct: 9, anchorTopPct: 11, width: 320, height: 118, rotate: 11, palette: "emerald", patternIndex: 0 },
-  { anchorLeftPct: 91, anchorTopPct: 14, width: 110, height: 140, rotate: -13, palette: "teal", patternIndex: 1 },
-  { anchorLeftPct: 50, anchorTopPct: 7, width: 280, height: 96, rotate: 6, palette: "green", patternIndex: 2 },
-  { anchorLeftPct: 11, anchorTopPct: 44, width: 95, height: 128, rotate: -16, palette: "lime", patternIndex: 1 },
-  { anchorLeftPct: 89, anchorTopPct: 46, width: 360, height: 104, rotate: 17, palette: "emerald", patternIndex: 2 },
-  { anchorLeftPct: 30, anchorTopPct: 72, width: 140, height: 200, rotate: -9, palette: "teal", patternIndex: 0 },
-  { anchorLeftPct: 70, anchorTopPct: 74, width: 300, height: 88, rotate: 12, palette: "lime", patternIndex: 0 },
-  { anchorLeftPct: 50, anchorTopPct: 38, width: 200, height: 160, rotate: 4, palette: "green", patternIndex: 1 },
-  { anchorLeftPct: 24, anchorTopPct: 24, width: 380, height: 92, rotate: 19, palette: "emerald", patternIndex: 2 },
-  { anchorLeftPct: 76, anchorTopPct: 26, width: 88, height: 176, rotate: -11, palette: "green", patternIndex: 0 },
+  { anchorLeftPct: 9, anchorTopPct: 11, width: 320, height: 118, rotate: 11, palette: "emerald", patternIndex: 0, kind: "mimic" },
+  { anchorLeftPct: 91, anchorTopPct: 14, width: 110, height: 140, rotate: -13, palette: "teal", patternIndex: 1, kind: "classic" },
+  { anchorLeftPct: 50, anchorTopPct: 7, width: 280, height: 96, rotate: 6, palette: "green", patternIndex: 2, kind: "mimic" },
+  { anchorLeftPct: 11, anchorTopPct: 44, width: 95, height: 128, rotate: -16, palette: "lime", patternIndex: 1, kind: "classic" },
+  { anchorLeftPct: 89, anchorTopPct: 46, width: 360, height: 104, rotate: 17, palette: "emerald", patternIndex: 2, kind: "classic" },
+  { anchorLeftPct: 30, anchorTopPct: 72, width: 140, height: 200, rotate: -9, palette: "teal", patternIndex: 0, kind: "mimic" },
+  { anchorLeftPct: 70, anchorTopPct: 74, width: 300, height: 88, rotate: 12, palette: "lime", patternIndex: 0, kind: "mimic" },
+  { anchorLeftPct: 50, anchorTopPct: 38, width: 200, height: 160, rotate: 4, palette: "green", patternIndex: 1, kind: "classic" },
+  { anchorLeftPct: 24, anchorTopPct: 24, width: 380, height: 92, rotate: 19, palette: "emerald", patternIndex: 2, kind: "mimic" },
+  { anchorLeftPct: 76, anchorTopPct: 26, width: 88, height: 176, rotate: -11, palette: "green", patternIndex: 0, kind: "classic" },
 ];
 
 function LeafShape({
@@ -52,11 +60,19 @@ function LeafShape({
   index: number;
   reducedMotion: boolean;
 }) {
-  const { width, height, rotate, palette, patternIndex, anchorLeftPct, anchorTopPct } =
+  const { width, height, rotate, palette, patternIndex, anchorLeftPct, anchorTopPct, kind } =
     config;
 
   const fallDuration = FALL_DURATION_BASE + (index % 6) * 11;
   const phaseDelay = -(index / BASE_LEAVES.length) * fallDuration;
+  const swayX = 5 + noise(index + 3) * 7;
+  const swayTilt = 1.4 + noise(index + 11) * 2.6;
+  const swayDuration = SWAY_DURATION + noise(index + 17) * 12;
+  const bobY = 0.8 + noise(index + 29) * 2.1;
+  const bobDuration = 8 + noise(index + 43) * 5;
+  const swayPhase = phaseDelay * (0.25 + noise(index + 67) * 0.35);
+  const driftRotate = (noise(index + 79) - 0.5) * 3.2;
+  const driftRotateDuration = 18 + noise(index + 97) * 16;
 
   const styleAnchor: CSSProperties = {
     left: `${anchorLeftPct}%`,
@@ -73,6 +89,7 @@ function LeafShape({
           palette={palette}
           patternIndex={patternIndex}
           leafIndex={index}
+          kind={kind}
         />
       </div>
     );
@@ -86,6 +103,7 @@ function LeafShape({
       animate={{
         /** Only vertical drift: always full opacity — reads as falling from above, not “popping in” */
         y: ["-125vh", "125vh"],
+        rotate: [0, driftRotate, -driftRotate * 0.6, driftRotate * 0.35, 0],
       }}
       transition={{
         y: {
@@ -95,26 +113,61 @@ function LeafShape({
           delay: phaseDelay,
           repeatDelay: 0,
         },
+        rotate: {
+          duration: driftRotateDuration,
+          repeat: Number.POSITIVE_INFINITY,
+          ease: "easeInOut",
+          delay: swayPhase,
+        },
       }}
     >
       <motion.div
         style={{ width, height }}
         className="relative"
         animate={{
-          x: [0, 8, -5, 4, 0],
-          rotate: [rotate, rotate + 1.8, rotate - 1, rotate],
+          x: [0, swayX, -swayX * 0.78, swayX * 0.48, 0],
+          y: [0, -bobY, bobY * 0.66, -bobY * 0.35, 0],
+          rotate: [
+            rotate,
+            rotate + swayTilt,
+            rotate - swayTilt * 0.82,
+            rotate + swayTilt * 0.34,
+            rotate,
+          ],
+          scale: [1, 1.012, 0.992, 1.008, 1],
         }}
         transition={{
-          duration: SWAY_DURATION + (index % 4) * 3,
-          repeat: Number.POSITIVE_INFINITY,
-          ease: "easeInOut",
-          delay: phaseDelay * 0.4,
+          x: {
+            duration: swayDuration,
+            repeat: Number.POSITIVE_INFINITY,
+            ease: "easeInOut",
+            delay: swayPhase,
+          },
+          y: {
+            duration: bobDuration,
+            repeat: Number.POSITIVE_INFINITY,
+            ease: "easeInOut",
+            delay: swayPhase * 0.7,
+          },
+          rotate: {
+            duration: swayDuration * 0.92,
+            repeat: Number.POSITIVE_INFINITY,
+            ease: "easeInOut",
+            delay: swayPhase,
+          },
+          scale: {
+            duration: bobDuration * 1.08,
+            repeat: Number.POSITIVE_INFINITY,
+            ease: "easeInOut",
+            delay: swayPhase * 0.55,
+          },
         }}
       >
         <PixelLeafSprite
           palette={palette}
           patternIndex={patternIndex}
           leafIndex={index}
+          kind={kind}
         />
       </motion.div>
     </motion.div>
@@ -126,14 +179,17 @@ function PixelLeafSprite({
   palette,
   patternIndex,
   leafIndex,
+  kind,
 }: {
   palette: LeafPalette;
   patternIndex: number;
   leafIndex: number;
+  kind: LeafKind;
 }) {
   const hueJitter = (patternIndex - 1) * 7 + (leafIndex % 5) * 5;
   const flipX = patternIndex === 1;
   const innerScale = 0.88 + (patternIndex % 3) * 0.08;
+  const spriteSrc = kind === "mimic" ? LEAF_PIXEL_MIMIC_SPRITE : LEAF_PIXEL_SPRITE;
 
   const filter = [
     LEAF_PALETTE_FILTER[palette],
@@ -142,19 +198,25 @@ function PixelLeafSprite({
     "drop-shadow(0 8px 18px rgba(34,197,94,0.28))",
   ].join(" ");
 
+  const spriteBaseClass = cn(
+    "h-full w-full max-h-full max-w-full object-contain",
+    "[image-rendering:pixelated] [image-rendering:-moz-crisp-edges]",
+  );
+
+  const baseTransform = `${flipX ? "scaleX(-1) " : ""}scale(${innerScale})`;
+  const kindTransform =
+    kind === "mimic" ? "rotate(-6deg) translate(-1%, 1%)" : "";
+
   return (
-    <div className="flex h-full w-full items-center justify-center overflow-visible">
+    <div className="relative flex h-full w-full items-center justify-center overflow-visible">
       <img
-        src={LEAF_PIXEL_SPRITE}
+        src={spriteSrc}
         alt=""
         draggable={false}
-        className={cn(
-          "h-full w-full max-h-full max-w-full object-contain",
-          "[image-rendering:pixelated] [image-rendering:-moz-crisp-edges]",
-        )}
+        className={spriteBaseClass}
         style={{
           filter,
-          transform: `${flipX ? "scaleX(-1) " : ""}scale(${innerScale})`,
+          transform: `${baseTransform} ${kindTransform}`,
           transformOrigin: "center center",
         }}
       />
@@ -442,28 +504,33 @@ function BackgroundForestLayer() {
 
 function HeroGeometric({
   title1 = "See how opinion",
-  title2 = "branches",
+  title2 = "Branches",
+  onBrandClick,
   children,
 }: {
   title1?: string;
   title2?: string;
+  onBrandClick?: () => void;
   children?: ReactNode;
 }) {
-  const fadeUpVariants = {
-    hidden: { opacity: 0, y: 30 },
-    visible: (i: number) => ({
-      opacity: 1,
-      y: 0,
-      transition: {
-        duration: 1,
-        delay: 0.5 + i * 0.2,
-        ease: [0.25, 0.4, 0.25, 1],
-      },
-    }),
-  };
+  const firstLineWords = title1.split(/\s+/).filter(Boolean);
+  const wordRevealBaseDelay = 0.6;
+  const wordRevealStepDelay = 0.4;
+  const postWordPause = 0.75;
+  const branchesAndSearchDelay =
+    wordRevealBaseDelay + Math.max(firstLineWords.length - 1, 0) * wordRevealStepDelay + postWordPause;
 
   return (
     <div className="relative flex min-h-screen w-full flex-col items-center justify-center overflow-hidden bg-[#050806]">
+      <button
+        type="button"
+        onClick={onBrandClick}
+        className="absolute left-4 top-4 z-40 cursor-pointer text-base font-semibold tracking-wide text-white transition-opacity hover:opacity-85 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 md:left-6 md:top-6 md:text-lg"
+        aria-label="Return to main page"
+      >
+        Sentimentree
+      </button>
+
       <div className="absolute inset-0 bg-gradient-to-br from-emerald-600/[0.14] via-emerald-900/[0.08] to-green-950/[0.12] blur-3xl" />
 
       <div className="pointer-events-none absolute inset-0 z-[3] bg-gradient-to-t from-[#050806]/75 via-transparent to-[#050806]/40" />
@@ -478,34 +545,53 @@ function HeroGeometric({
 
       <div className="relative z-10 flex w-full max-w-full flex-1 flex-col items-center justify-center px-4 md:px-6">
         <div className="mx-auto flex w-full max-w-3xl flex-col items-center justify-center text-center">
-          <motion.div
-            custom={0}
-            variants={fadeUpVariants}
-            initial="hidden"
-            animate="visible"
-            className="flex w-full flex-col items-center text-center"
-          >
+          <div className="flex w-full flex-col items-center text-center">
             <h1 className="mb-6 w-full text-center text-4xl font-bold tracking-tight sm:text-6xl md:mb-8 md:text-8xl">
-              <span className="bg-gradient-to-b from-white to-white/80 bg-clip-text text-transparent">
-                {title1}
+              <span>
+                {firstLineWords.map((word, index) => (
+                  <motion.span
+                    key={`${word}-${index}`}
+                    initial={{ opacity: 0, y: 18, filter: "blur(6px)" }}
+                    animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                    transition={{
+                      duration: 0.55,
+                      delay: wordRevealBaseDelay + index * wordRevealStepDelay,
+                      ease: [0.25, 0.4, 0.25, 1],
+                    }}
+                    className="inline-block bg-gradient-to-b from-white to-white/80 bg-clip-text text-transparent"
+                  >
+                    {word}
+                    {index < firstLineWords.length - 1 ? "\u00a0" : ""}
+                  </motion.span>
+                ))}
               </span>
               <br />
-              <span
+              <motion.span
+                initial={{ opacity: 0, y: 24, filter: "blur(8px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                transition={{
+                  duration: 0.8,
+                  delay: branchesAndSearchDelay,
+                  ease: [0.25, 0.4, 0.25, 1],
+                }}
                 className={cn(
-                  "bg-gradient-to-r from-emerald-300 via-lime-200 to-green-400 bg-clip-text text-transparent",
+                  "font-grand-cursive bg-gradient-to-r from-emerald-300 via-lime-200 to-green-400 bg-clip-text text-transparent",
                 )}
               >
                 {title2}
-              </span>
+              </motion.span>
             </h1>
-          </motion.div>
+          </div>
 
           {children ? (
             <motion.div
-              custom={1}
-              variants={fadeUpVariants}
-              initial="hidden"
-              animate="visible"
+              initial={{ opacity: 0, y: 26, filter: "blur(8px)" }}
+              animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+              transition={{
+                duration: 0.8,
+                delay: branchesAndSearchDelay,
+                ease: [0.25, 0.4, 0.25, 1],
+              }}
               className="flex w-full flex-col items-center justify-center text-center"
             >
               {children}
