@@ -9,6 +9,8 @@ from .config import PipelineConfig
 class Tagger:
     """Named entity recognition and topic tagging using spaCy."""
 
+    _NLP_CACHE: dict[str, Language] = {}
+
     def __init__(self, config: PipelineConfig | None = None) -> None:
         self.config = config or PipelineConfig()
         self._nlp: Language | None = None
@@ -16,7 +18,16 @@ class Tagger:
     @property
     def nlp(self) -> Language:
         if self._nlp is None:
-            self._nlp = spacy.load(self.config.spacy_model)
+            model_name = self.config.spacy_model
+            if model_name not in self._NLP_CACHE:
+                try:
+                    self._NLP_CACHE[model_name] = spacy.load(model_name)
+                except OSError:
+                    fallback = spacy.blank("en")
+                    if "sentencizer" not in fallback.pipe_names:
+                        fallback.add_pipe("sentencizer")
+                    self._NLP_CACHE[model_name] = fallback
+            self._nlp = self._NLP_CACHE[model_name]
         return self._nlp
 
     def extract_entities(self, text: str) -> list[str]:

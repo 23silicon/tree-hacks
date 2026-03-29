@@ -4,21 +4,16 @@ import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
 
 import "./animated-search-bar.css";
+import { fetchPredictionSuggestions } from "@/lib/api";
 
 export const dummyData = [
-  "React",
-  "Vue",
-  "Svelte",
-  "Next.js",
-  "Napier88",
-  "Gatsby",
-  "NewtonScript",
-  "Angular",
-  "Scala",
-  "Groovy",
-  "Haskell",
-  "Lua",
-  "R",
+  "No Kings protest",
+  "Rams Stanley Cup chances",
+  "Federal Reserve rate cuts",
+  "TikTok ban timeline",
+  "Ukraine aid vote",
+  "AI regulation in Congress",
+  "California housing policy",
 ];
 
 const GooeyFilter = () => {
@@ -279,6 +274,21 @@ const getResultItemTransition = (index: number) => ({
   filter: { ease: "easeInOut" as const },
 });
 
+function buildFallbackSuggestions(query: string): string[] {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  return [
+    trimmed,
+    `${trimmed} latest developments`,
+    `${trimmed} timeline`,
+    `${trimmed} related prediction markets`,
+    `What happened with ${trimmed}?`,
+  ];
+}
+
 type SearchState = {
   step: 1 | 2;
   searchData: string[];
@@ -287,11 +297,13 @@ type SearchState = {
 };
 
 type GooeySearchBarProps = {
-  /** Landing page: jump to graph after search (Enter or picking a result). */
+  /** Legacy landing-page navigation hook. */
   onEnterGraph?: () => void;
+  /** Main hook used by the app to run the backend workflow. */
+  onSearch?: (query: string) => Promise<boolean | void> | boolean | void;
 };
 
-export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
+export const GooeySearchBar = ({ onEnterGraph, onSearch }: GooeySearchBarProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [state, setState] = useState<SearchState>({
@@ -312,9 +324,24 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
     setState((prevState) => ({ ...prevState, searchText: e.target.value }));
   };
 
+  const submitSearch = async (query: string) => {
+    const trimmed = query.trim();
+    if (!trimmed) return;
+
+    setState((prevState) => ({ ...prevState, isLoading: true }));
+    try {
+      const handled = await onSearch?.(trimmed);
+      if (handled !== false) {
+        onEnterGraph?.();
+      }
+    } finally {
+      setState((prevState) => ({ ...prevState, isLoading: false }));
+    }
+  };
+
   const handleInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && state.searchText.trim() !== "") {
-      onEnterGraph?.();
+      void submitSearch(state.searchText);
     }
   };
 
@@ -334,23 +361,35 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
   useEffect(() => {
     let isCancelled = false;
 
+    if (state.step !== 2) {
+      setState((prevState) => ({
+        ...prevState,
+        searchData: [],
+        isLoading: false,
+      }));
+      return () => {
+        isCancelled = true;
+      };
+    }
+
     if (debouncedSearchText) {
-      setState((prevState) => ({ ...prevState, isLoading: true }));
+      const fallback = buildFallbackSuggestions(String(debouncedSearchText).trim());
+      setState((prevState) => ({
+        ...prevState,
+        searchData: fallback,
+        isLoading: true,
+      }));
 
       const fetchData = async () => {
         try {
-          await new Promise((resolve) => setTimeout(resolve, 500));
-
-          const filteredData = dummyData.filter((item) =>
-            item
-              .toLowerCase()
-              .includes(String(debouncedSearchText).trim().toLowerCase())
+          const suggestions = await fetchPredictionSuggestions(
+            String(debouncedSearchText).trim()
           );
 
           if (!isCancelled) {
             setState((prevState) => ({
               ...prevState,
-              searchData: filteredData,
+              searchData: suggestions.length > 0 ? suggestions : fallback,
               isLoading: false,
             }));
           }
@@ -387,45 +426,49 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
           transition={{ duration: 0.75, type: "spring", bounce: 0.15 }}
         >
           <AnimatePresence mode="popLayout">
-            <motion.div
-              key="search-text-wrapper"
-              className="search-results"
-              role="listbox"
-              aria-label="Search results"
-              exit={{ scale: 0, opacity: 0 }}
-              transition={{
-                delay: isUnsupported ? 0.5 : 1.25,
-                duration: 0.5,
-              }}
-            >
-              <AnimatePresence mode="popLayout">
-                {state.searchData.map((item, index) => (
-                  <motion.div
-                    key={item}
-                    whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
-                    variants={getResultItemVariants(index, isUnsupported)}
-                    initial="initial"
-                    animate="animate"
-                    exit="exit"
-                    transition={getResultItemTransition(index)}
-                    className="search-result"
-                    role="option"
-                    onClick={() => onEnterGraph?.()}
-                  >
-                    <div className="search-result-title">
-                      <InfoIcon index={index} />
-                      <motion.span
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        transition={{ delay: index * 0.12 + 0.3 }}
-                      >
-                        {item}
-                      </motion.span>
-                    </div>
-                  </motion.div>
-                ))}
-              </AnimatePresence>
-            </motion.div>
+            {state.step === 2 && state.searchData.length > 0 ? (
+              <motion.div
+                key="search-text-wrapper"
+                className="search-results"
+                role="listbox"
+                aria-label="Search results"
+                exit={{ scale: 0, opacity: 0 }}
+                transition={{
+                  delay: isUnsupported ? 0.5 : 1.25,
+                  duration: 0.5,
+                }}
+              >
+                <AnimatePresence mode="popLayout">
+                  {state.searchData.map((item, index) => (
+                    <motion.div
+                      key={item}
+                      whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
+                      variants={getResultItemVariants(index, isUnsupported)}
+                      initial="initial"
+                      animate="animate"
+                      exit="exit"
+                      transition={getResultItemTransition(index)}
+                      className="search-result"
+                      role="option"
+                      onClick={() => {
+                        void submitSearch(item);
+                      }}
+                    >
+                      <div className="search-result-title">
+                        <InfoIcon index={index} />
+                        <motion.span
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          transition={{ delay: index * 0.12 + 0.3 }}
+                        >
+                          {item}
+                        </motion.span>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              </motion.div>
+            ) : null}
           </AnimatePresence>
 
           <motion.div
@@ -439,15 +482,15 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
             {state.step === 1 ? (
               <span className="search-text">Search</span>
             ) : (
-              <input
-                ref={inputRef}
-                type="text"
-                className="search-input"
-                placeholder="Type R..."
-                aria-label="Search input"
-                onChange={handleSearch}
-                onKeyDown={handleInputKeyDown}
-              />
+                <input
+                  ref={inputRef}
+                  type="text"
+                  className="search-input"
+                  placeholder="Type a topic or event..."
+                  aria-label="Search input"
+                  onChange={handleSearch}
+                  onKeyDown={handleInputKeyDown}
+                />
             )}
           </motion.div>
 

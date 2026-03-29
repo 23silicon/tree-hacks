@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -37,7 +38,7 @@ class PipelineConfig:
     affinity_embedding_threshold: float = 0.50
 
     # Stage 2: LLM scoring
-    llm_provider: str = "anthropic"       # "anthropic", "openai", or "ollama"
-    llm_model: str = "claude-sonnet-4-20250514"  # fast + capable for scoring
-    llm_base_url: str | None = None       # override for Ollama etc.
-    llm_temperature: float = 0.1          # low temp for consistent scoring
+    llm_provider: str = os.environ.get("SENTIMENT_TREE_LLM_PROVIDER", "anthropic")
+    llm_model: str = os.environ.get("SENTIMENT_TREE_LLM_MODEL", "claude-sonnet-4-20250514")
+    llm_base_url: str | None = os.environ.get("SENTIMENT_TREE_LLM_BASE_URL") or None
+    llm_temperature: float = float(os.environ.get("SENTIMENT_TREE_LLM_TEMPERATURE", "0.1"))

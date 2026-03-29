@@ -109,14 +109,43 @@ class LLMAffinityScorer:
     def _call_llm(self, user_prompt: str) -> str:
         """Call the configured LLM and return raw response text."""
         if self.config.llm_provider == "anthropic":
-            response = self.client.messages.create(
-                model=self.config.llm_model,
-                max_tokens=300,
-                temperature=self.config.llm_temperature,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": user_prompt}],
-            )
-            return response.content[0].text
+            fallback_models = [
+                self.config.llm_model,
+                *[
+                    model.strip()
+                    for model in os.environ.get(
+                        "SENTIMENT_TREE_LLM_FALLBACK_MODELS",
+                        "claude-sonnet-4-20250514,claude-3-7-sonnet-20250219,claude-3-haiku-20240307",
+                    ).split(",")
+                    if model.strip()
+                ],
+            ]
+            seen_models: set[str] = set()
+            last_error: Exception | None = None
+
+            for model_name in fallback_models:
+                if model_name in seen_models:
+                    continue
+                seen_models.add(model_name)
+                try:
+                    response = self.client.messages.create(
+                        model=model_name,
+                        max_tokens=300,
+                        temperature=self.config.llm_temperature,
+                        system=SYSTEM_PROMPT,
+                        messages=[{"role": "user", "content": user_prompt}],
+                    )
+                    self.config.llm_model = model_name
+                    return response.content[0].text
+                except Exception as exc:
+                    last_error = exc
+                    message = str(exc)
+                    if "not_found_error" not in message and "model:" not in message:
+                        raise
+
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("Anthropic call failed without a specific error.")
         else:
             # OpenAI-compatible (OpenAI / Ollama)
             response = self.client.chat.completions.create(

@@ -13,6 +13,8 @@ class SentimentScorer:
     "yes" vs "no" direction — NOT generic positive/negative.
     """
 
+    _CLASSIFIER_CACHE: dict[tuple[str, int], object] = {}
+
     def __init__(
         self,
         contract_question: str,
@@ -30,11 +32,14 @@ class SentimentScorer:
     @property
     def classifier(self):
         if self._classifier is None:
-            self._classifier = hf_pipeline(
-                "zero-shot-classification",
-                model=self.config.sentiment_model,
-                device=-1,  # CPU; set to 0 for GPU
-            )
+            cache_key = (self.config.sentiment_model, -1)
+            if cache_key not in self._CLASSIFIER_CACHE:
+                self._CLASSIFIER_CACHE[cache_key] = hf_pipeline(
+                    "zero-shot-classification",
+                    model=self.config.sentiment_model,
+                    device=-1,  # CPU; set to 0 for GPU
+                )
+            self._classifier = self._CLASSIFIER_CACHE[cache_key]
         return self._classifier
 
     def score(self, text: str) -> tuple[float, float]:

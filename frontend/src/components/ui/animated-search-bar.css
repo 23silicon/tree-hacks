@@ -64,11 +64,13 @@
   filter: url(#goo-effect);
   cursor: pointer;
   max-width: max-content;
+  position: relative;
+  overflow: visible;
 }
 
 .gooey-search .search-results {
   position: relative;
-  z-index: -1;
+  z-index: 8;
 }
 
 .gooey-search .search-result {
