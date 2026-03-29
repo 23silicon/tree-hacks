@@ -7,6 +7,7 @@ import {
   forceY,
 } from "d3-force";
 import {
+  getEventLaneTargets,
   getPredictionSemicircleTargets,
   PREDICTION_SEMICIRCLE_FORCE_STRENGTH,
   getPredictionArcRadiusPx,
@@ -62,49 +63,39 @@ export function createLayout(
       graphNodes,
       layoutParamsRef?.current?.arcSlider
     );
-
-  const descIds = graphNodes
-    .filter((n) => n.data?.category === "descendant")
-    .map((n) => n.id);
-  const branchIds = graphNodes
-    .filter(
-      (n) =>
-        n.data?.category === "branch" || n.data?.category === "newBranch"
-    )
-    .map((n) => n.id);
   const predTargetsInitial = getPredictionSemicircleTargets(
     graphNodes,
     cx,
     cy,
     radiusPx()
   );
+  const eventTargetsInitial = getEventLaneTargets(
+    graphNodes,
+    width,
+    height,
+    radiusPx()
+  );
   const predIdSet = new Set(predTargetsInitial.keys());
 
   const simNodes = graphNodes.map((node) => {
-    const cat = node.data?.category ?? "branch";
+    const cat = node.data?.category ?? "event";
     let x;
     let y;
 
     if (node.id === "root") {
       x = cx;
       y = cy;
-    } else if (cat === "descendant") {
-      const idx = descIds.indexOf(node.id);
-      const total = descIds.length;
-      const spread = Math.min(300, total * 80);
-      x = cx + (total > 1 ? (idx / (total - 1) - 0.5) * spread : 0);
-      y = cy + 160 + idx * 70;
+    } else if (cat === "event") {
+      const target = eventTargetsInitial.get(node.id) ?? { x: cx, y: cy + 120 };
+      x = target.x;
+      y = target.y;
     } else if (cat === "prediction") {
       const p = predTargetsInitial.get(node.id);
       x = p.x;
       y = p.y;
     } else {
-      const count = branchIds.length;
-      const idx = branchIds.indexOf(node.id);
-      const angle = (idx / Math.max(count, 1)) * 2 * Math.PI;
-      const r = 160;
-      x = cx + Math.cos(angle) * r;
-      y = cy + Math.sin(angle) * r;
+      x = cx;
+      y = cy;
     }
 
     return { id: node.id, category: cat, x, y, vx: 0, vy: 0 };
@@ -125,6 +116,8 @@ export function createLayout(
 
   let predTargetCache = null;
   let predCacheRadius = null;
+  let eventTargetCache = null;
+  let eventCacheRadius = null;
   function predictionTargetXY(d) {
     if (!predIdSet.has(d.id)) return { x: d.x, y: d.y };
     const r = radiusPx();
@@ -139,6 +132,15 @@ export function createLayout(
     }
     return predTargetCache.get(d.id) ?? { x: d.x, y: d.y };
   }
+  function eventTargetXY(d) {
+    if (d.category !== "event") return { x: d.x, y: d.y };
+    const r = radiusPx();
+    if (eventCacheRadius !== r || !eventTargetCache) {
+      eventTargetCache = getEventLaneTargets(graphNodes, width, height, r);
+      eventCacheRadius = r;
+    }
+    return eventTargetCache.get(d.id) ?? { x: d.x, y: d.y };
+  }
 
   const simulation = forceSimulation(simNodes)
     .force(
@@ -149,11 +151,17 @@ export function createLayout(
         .strength(linkStrengthAccessor(predIdSet, "rest"))
     )
     .force("charge", forceManyBody().strength(-500))
-    .force("collide", forceCollide(84))
+    .force("collide", forceCollide((d) => (d.category === "prediction" ? 70 : 56)))
     .force(
-      "descendantY",
-      forceY((d) => (d.category === "descendant" ? cy + 220 : cy)).strength(
-        (d) => (d.category === "descendant" ? 0.12 : 0)
+      "eventX",
+      forceX((d) => eventTargetXY(d).x).strength((d) =>
+        d.category === "event" ? 0.3 : 0
+      )
+    )
+    .force(
+      "eventY",
+      forceY((d) => eventTargetXY(d).y).strength((d) =>
+        d.category === "event" ? 0.36 : 0
       )
     )
     .force(
@@ -178,8 +186,12 @@ export function createLayout(
 export function refreshPredictionAnchorForces(simulation, simNodes) {
   const predX = simulation.force("predX");
   const predY = simulation.force("predY");
+  const eventX = simulation.force("eventX");
+  const eventY = simulation.force("eventY");
   if (predX?.initialize) predX.initialize(simNodes);
   if (predY?.initialize) predY.initialize(simNodes);
+  if (eventX?.initialize) eventX.initialize(simNodes);
+  if (eventY?.initialize) eventY.initialize(simNodes);
 }
 
 export function settleSimulation(simulation, maxTicks = 500) {

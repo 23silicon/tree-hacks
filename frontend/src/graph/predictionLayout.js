@@ -1,149 +1,18 @@
 export const PREDICTION_SEMICIRCLE = {
-  baseRadius: 180,
-  radiusPerNode: 40,
-  /** Padding at arc endpoints so nodes don’t sit on the gap (rad). */
+  baseRadius: 220,
+  radiusPerNode: 18,
   angleEps: 0.06,
-  /** Portion of a full circle the predictions occupy (rest is open toward root). */
   arcCoverage: 0.9,
-  /** Direction of gap center (rad); π/2 = screen-down = toward canvas center from top arc. */
   gapCenterRad: Math.PI / 2,
 };
 
-export const DESCENDANT_SEMICIRCLE = {
-  margin: 72,
-  radius: 240,
-  angleEps: 0.1,
-};
-
-export function getPredictionNodeIds(graphNodes) {
-  return graphNodes
-    .filter((n) => n.data?.category === "prediction")
-    .map((n) => n.id);
-}
-
-export function getDescendantNodeIds(graphNodes) {
-  return graphNodes
-    .filter((n) => n.data?.category === "descendant")
-    .map((n) => n.id);
-}
-
-/** Descendants in chronological order (oldest first) for reset-view reveal. */
-export function getSortedDescendantIds(graphNodes) {
-  return graphNodes
-    .filter((n) => n.data?.category === "descendant")
-    .sort(
-      (a, b) =>
-        new Date(a.data.timestamp).getTime() -
-        new Date(b.data.timestamp).getTime()
-    )
-    .map((n) => n.id);
-}
-
-/** Branch + newBranch in chronological order for reset-view reveal (after descendants). */
-export function getSortedBranchIds(graphNodes) {
-  return graphNodes
-    .filter(
-      (n) =>
-        n.data?.category === "branch" || n.data?.category === "newBranch"
-    )
-    .sort(
-      (a, b) =>
-        new Date(a.data.timestamp).getTime() -
-        new Date(b.data.timestamp).getTime()
-    )
-    .map((n) => n.id);
-}
-
-/**
- * Layers of branch/newBranch ids to reveal in parallel per layer. Uses only
- * edges between branch-category nodes (e.g. branch-1 → newbranch-1). Root→branch
- * edges are ignored here so nodes with no internal incoming appear in wave 0 together.
- */
-export function getBranchRevealWaves(graphNodes, graphEdges) {
-  const branchIds = new Set(
-    graphNodes
-      .filter(
-        (n) =>
-          n.data?.category === "branch" || n.data?.category === "newBranch"
-      )
-      .map((n) => n.id)
-  );
-  if (branchIds.size === 0) return [];
-
-  const internalEdges = graphEdges.filter(
-    (e) => branchIds.has(e.source) && branchIds.has(e.target)
-  );
-
-  const indeg = new Map();
-  for (const id of branchIds) indeg.set(id, 0);
-  for (const e of internalEdges) {
-    indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
-  }
-
-  const ts = (id) => {
-    const n = graphNodes.find((x) => x.id === id);
-    return n?.data?.timestamp
-      ? new Date(n.data.timestamp).getTime()
-      : 0;
-  };
-
-  const waves = [];
-  const remaining = new Set(branchIds);
-
-  while (remaining.size > 0) {
-    const layer = [...remaining].filter((id) => indeg.get(id) === 0);
-    if (layer.length === 0) break;
-    layer.sort((a, b) => ts(a) - ts(b));
-    waves.push(layer);
-
-    for (const id of layer) {
-      remaining.delete(id);
-    }
-    for (const id of layer) {
-      for (const e of internalEdges) {
-        if (e.source === id) {
-          indeg.set(e.target, (indeg.get(e.target) ?? 0) - 1);
-        }
-      }
-    }
-  }
-
-  return waves;
-}
-
-export function getBranchNodeCount(graphNodes) {
-  return graphNodes.filter(
-    (n) =>
-      n.data?.category === "branch" || n.data?.category === "newBranch"
-  ).length;
-}
-
-export const PRED_ARC_BASE_PX = 185;
-export const PRED_ARC_PER_BRANCH_PX = 36;
-export const PRED_ARC_INNER_MULT = 0.52;
-export const PRED_ARC_OUTER_MULT = 1.48;
-
-export function getPredictionArcRadiusPx(graphNodes, arcSlider01) {
-  const b = getBranchNodeCount(graphNodes);
-  const mid = PRED_ARC_BASE_PX + Math.max(0, b) * PRED_ARC_PER_BRANCH_PX;
-  const rMin = mid * PRED_ARC_INNER_MULT;
-  const rMax = mid * PRED_ARC_OUTER_MULT;
-  const t =
-    typeof arcSlider01 === "number" && !Number.isNaN(arcSlider01)
-      ? Math.min(1, Math.max(0, arcSlider01))
-      : 1;
-  return rMin + t * (rMax - rMin);
-}
-
+export const PRED_ARC_BASE_PX = 220;
+export const PRED_ARC_PER_EVENT_PX = 20;
+export const PRED_ARC_INNER_MULT = 0.84;
+export const PRED_ARC_OUTER_MULT = 1.26;
 export const PREDICTION_SEMICIRCLE_FORCE_STRENGTH = 0.62;
 
-export function getPredictionSemicircleTargets(
-  graphNodes,
-  originX,
-  originY,
-  radiusPx
-) {
-  const ids = getPredictionNodeIds(graphNodes);
+function buildArcTargets(ids, originX, originY, radiusPx) {
   const { baseRadius, radiusPerNode, angleEps, arcCoverage, gapCenterRad } =
     PREDICTION_SEMICIRCLE;
 
@@ -153,9 +22,6 @@ export function getPredictionSemicircleTargets(
       ? radiusPx
       : baseRadius + Math.max(0, n - 1) * radiusPerNode;
 
-  const cx = originX;
-  const cy = originY;
-
   const gap = (1 - arcCoverage) * 2 * Math.PI;
   const sweep = arcCoverage * 2 * Math.PI;
   const start = gapCenterRad + gap / 2;
@@ -164,16 +30,197 @@ export function getPredictionSemicircleTargets(
   const t1 = end - angleEps;
 
   const map = new Map();
-  for (let i = 0; i < n; i++) {
+  for (let i = 0; i < n; i += 1) {
     const theta =
       n === 1 ? (t0 + t1) / 2 : t0 + (i / (n - 1)) * (t1 - t0);
 
     map.set(ids[i], {
-      x: cx + radius * Math.cos(theta),
-      y: cy + radius * Math.sin(theta),
+      x: originX + radius * Math.cos(theta),
+      y: originY + radius * Math.sin(theta),
     });
   }
   return map;
+}
+
+function averagePositions(points, fallback) {
+  if (!Array.isArray(points) || points.length === 0) {
+    return fallback;
+  }
+  const total = points.reduce(
+    (acc, point) => ({
+      x: acc.x + point.x,
+      y: acc.y + point.y,
+    }),
+    { x: 0, y: 0 }
+  );
+  return {
+    x: total.x / points.length,
+    y: total.y / points.length,
+  };
+}
+
+export function getPredictionNodeIds(graphNodes) {
+  return graphNodes
+    .filter((node) => node.data?.category === "prediction")
+    .map((node) => node.id);
+}
+
+export function getEventNodeIds(graphNodes) {
+  return graphNodes
+    .filter((node) => node.data?.category === "event")
+    .map((node) => node.id);
+}
+
+export function getSortedEventIds(graphNodes) {
+  return graphNodes
+    .filter((node) => node.data?.category === "event")
+    .sort(
+      (a, b) =>
+        new Date(a.data.timestamp).getTime() -
+        new Date(b.data.timestamp).getTime()
+    )
+    .map((node) => node.id);
+}
+
+export function getSortedDescendantIds(graphNodes) {
+  return getSortedEventIds(graphNodes);
+}
+
+export function getEventLaneKeys(graphNodes) {
+  const keys = [];
+  const seen = new Set();
+  for (const node of graphNodes) {
+    if (node.data?.category !== "event") continue;
+    const key = node.data?.stackKey || "general";
+    if (seen.has(key)) continue;
+    seen.add(key);
+    keys.push(key);
+  }
+  return keys;
+}
+
+export function getBranchRevealWaves(graphNodes) {
+  const eventIds = getSortedEventIds(graphNodes);
+  return eventIds.length > 0 ? [eventIds] : [];
+}
+
+export function getBranchNodeCount(graphNodes) {
+  return Math.max(getEventLaneKeys(graphNodes).length, 1);
+}
+
+export function getPredictionArcRadiusPx(graphNodes, arcSlider01) {
+  const eventCount = Math.max(getEventNodeIds(graphNodes).length, 3);
+  const mid = PRED_ARC_BASE_PX + eventCount * PRED_ARC_PER_EVENT_PX;
+  const rMin = mid * PRED_ARC_INNER_MULT;
+  const rMax = mid * PRED_ARC_OUTER_MULT;
+  const t =
+    typeof arcSlider01 === "number" && !Number.isNaN(arcSlider01)
+      ? Math.min(1, Math.max(0, arcSlider01))
+      : 1;
+  return rMin + t * (rMax - rMin);
+}
+
+export function getPredictionSemicircleTargets(
+  graphNodes,
+  originX,
+  originY,
+  radiusPx
+) {
+  const ids = getPredictionNodeIds(graphNodes);
+  return buildArcTargets(ids, originX, originY, radiusPx);
+}
+
+export function getEventLaneTargets(graphNodes, width, height, radiusPx) {
+  const events = graphNodes
+    .filter((node) => node.data?.category === "event")
+    .sort(
+      (a, b) =>
+        new Date(a.data.timestamp).getTime() -
+        new Date(b.data.timestamp).getTime()
+    );
+  const cx = width / 2;
+  const cy = height / 2;
+  const predictionRadius = getPredictionArcRadiusPx(graphNodes, 1);
+  const effectivePredictionRadius =
+    typeof radiusPx === "number" && radiusPx > 0
+      ? radiusPx
+      : predictionRadius;
+  const predictionTargets = getPredictionSemicircleTargets(
+    graphNodes,
+    cx,
+    cy,
+    effectivePredictionRadius
+  );
+  const predictionIds = [...predictionTargets.keys()];
+
+  const fallbackBranchKeys = [];
+  const fallbackSeen = new Set();
+  for (const event of events) {
+    const supportIds = Array.isArray(event.data?.supportPredictionIds)
+      ? event.data.supportPredictionIds.filter((id) => predictionTargets.has(id))
+      : [];
+    if (supportIds.length > 0) {
+      continue;
+    }
+    const key = event.data?.stackKey || event.id;
+    if (fallbackSeen.has(key)) {
+      continue;
+    }
+    fallbackSeen.add(key);
+    fallbackBranchKeys.push(key);
+  }
+  const fallbackTargets = buildArcTargets(
+    fallbackBranchKeys,
+    cx,
+    cy,
+    effectivePredictionRadius * 0.82
+  );
+  const minRadius = Math.max(92, Math.min(124, effectivePredictionRadius * 0.28));
+  const maxRadius = Math.max(
+    minRadius + 120,
+    effectivePredictionRadius * 0.78
+  );
+  const radialStep =
+    events.length > 1 ? (maxRadius - minRadius) / (events.length - 1) : 0;
+  const branchCounts = new Map();
+
+  const targets = new Map();
+  events.forEach((event, index) => {
+    const supportIds = Array.isArray(event.data?.supportPredictionIds)
+      ? event.data.supportPredictionIds.filter((id) => predictionTargets.has(id))
+      : [];
+    const branchKey =
+      supportIds.length > 0
+        ? supportIds.join("|")
+        : event.data?.stackKey || event.id;
+    const branchOffset = branchCounts.get(branchKey) ?? 0;
+    branchCounts.set(branchKey, branchOffset + 1);
+    const branchTarget =
+      supportIds.length > 0
+        ? averagePositions(
+            supportIds
+              .map((id) => predictionTargets.get(id))
+              .filter(Boolean),
+            { x: cx, y: cy - effectivePredictionRadius * 0.75 }
+          )
+        : fallbackTargets.get(branchKey) ?? { x: cx, y: cy - effectivePredictionRadius * 0.72 };
+    const dx = branchTarget.x - cx;
+    const dy = branchTarget.y - cy;
+    const magnitude = Math.hypot(dx, dy) || 1;
+    const ux = dx / magnitude;
+    const uy = dy / magnitude;
+    const px = -uy;
+    const py = ux;
+    const distance = minRadius + index * radialStep;
+    const lateralOffset =
+      ((branchOffset % 3) - 1) * Math.min(20, 12 + branchOffset * 1.5);
+
+    targets.set(event.id, {
+      x: cx + ux * distance + px * lateralOffset,
+      y: cy + uy * distance + py * lateralOffset,
+    });
+  });
+  return targets;
 }
 
 export function applyPredictionSemiCirclePins(
@@ -183,86 +230,39 @@ export function applyPredictionSemiCirclePins(
   height,
   radiusPx
 ) {
-  const byId = new Map(simNodes.map((s) => [s.id, s]));
-  const ox = width / 2;
-  const oy = height / 2;
+  const byId = new Map(simNodes.map((node) => [node.id, node]));
   const targets = getPredictionSemicircleTargets(
     graphNodes,
-    ox,
-    oy,
+    width / 2,
+    height / 2,
     radiusPx
   );
 
   for (const [id, pos] of targets) {
-    const sn = byId.get(id);
-    if (!sn) continue;
-    sn.x = pos.x;
-    sn.y = pos.y;
-    sn.fx = pos.x;
-    sn.fy = pos.y;
-    sn.vx = 0;
-    sn.vy = 0;
+    const simNode = byId.get(id);
+    if (!simNode) continue;
+    simNode.x = pos.x;
+    simNode.y = pos.y;
+    simNode.fx = pos.x;
+    simNode.fy = pos.y;
+    simNode.vx = 0;
+    simNode.vy = 0;
   }
 }
 
-export function applyDescendantSemiCirclePins(simNodes, graphNodes, width, height) {
-  const ids = getDescendantNodeIds(graphNodes);
-  const byId = new Map(simNodes.map((s) => [s.id, s]));
-  const { margin, radius, angleEps } = DESCENDANT_SEMICIRCLE;
+export function applyEventLanePins(simNodes, graphNodes, width, height) {
+  const byId = new Map(simNodes.map((node) => [node.id, node]));
+  const targets = getEventLaneTargets(graphNodes, width, height);
 
-  const n = ids.length;
-  const cx = width / 2;
-  const cy = height - margin - radius;
-  const start = angleEps;
-  const end = Math.PI - angleEps;
-
-  for (let i = 0; i < n; i++) {
-    const sn = byId.get(ids[i]);
-    if (!sn) continue;
-
-    const theta =
-      n === 1
-        ? Math.PI / 2
-        : start + (i / (n - 1)) * (end - start);
-
-    const x = cx + radius * Math.cos(theta);
-    const y = cy + radius * Math.sin(theta);
-
-    sn.x = x;
-    sn.y = y;
-    sn.fx = x;
-    sn.fy = y;
-    sn.vx = 0;
-    sn.vy = 0;
-  }
-}
-
-export function applyRootAndBranchRing(simNodes, graphNodes, width, height) {
-  const cx = width / 2;
-  const cy = height / 2;
-  const root = simNodes.find((s) => s.id === "root");
-  if (root) {
-    root.x = cx;
-    root.y = cy;
-    root.vx = 0;
-    root.vy = 0;
-  }
-  const branchIds = graphNodes
-    .filter(
-      (n) =>
-        n.data?.category === "branch" || n.data?.category === "newBranch"
-    )
-    .map((n) => n.id);
-  const count = branchIds.length;
-  const r = 160;
-  for (let idx = 0; idx < branchIds.length; idx++) {
-    const sn = simNodes.find((s) => s.id === branchIds[idx]);
-    if (!sn) continue;
-    const angle = (idx / Math.max(count, 1)) * 2 * Math.PI;
-    sn.x = cx + Math.cos(angle) * r;
-    sn.y = cy + Math.sin(angle) * r;
-    sn.vx = 0;
-    sn.vy = 0;
+  for (const [id, pos] of targets) {
+    const simNode = byId.get(id);
+    if (!simNode) continue;
+    simNode.x = pos.x;
+    simNode.y = pos.y;
+    simNode.fx = pos.x;
+    simNode.fy = pos.y;
+    simNode.vx = 0;
+    simNode.vy = 0;
   }
 }
 
@@ -273,7 +273,6 @@ export function applyResetViewLayout(
   height,
   predictionRadiusPx
 ) {
-  applyRootAndBranchRing(simNodes, graphNodes, width, height);
   applyPredictionSemiCirclePins(
     simNodes,
     graphNodes,
@@ -281,20 +280,21 @@ export function applyResetViewLayout(
     height,
     predictionRadiusPx
   );
-  applyDescendantSemiCirclePins(simNodes, graphNodes, width, height);
+  applyEventLanePins(simNodes, graphNodes, width, height);
+
   const cx = width / 2;
   const cy = height / 2;
-  for (const sn of simNodes) {
-    if (sn.id === "root") {
-      sn.x = cx;
-      sn.y = cy;
-      sn.fx = cx;
-      sn.fy = cy;
-      sn.vx = 0;
-      sn.vy = 0;
+  for (const simNode of simNodes) {
+    if (simNode.id === "root") {
+      simNode.x = cx;
+      simNode.y = cy;
+      simNode.fx = cx;
+      simNode.fy = cy;
+      simNode.vx = 0;
+      simNode.vy = 0;
     } else {
-      sn.fx = null;
-      sn.fy = null;
+      simNode.fx = null;
+      simNode.fy = null;
     }
   }
 }

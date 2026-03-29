@@ -3,16 +3,20 @@ import { Handle, Position } from "@xyflow/react";
 import { colorsFor } from "./groupColors";
 
 const SOURCE_ICONS = {
-  twitter: "𝕏",
-  reddit: "⬡",
-  news: "📰",
-  polymarket: "📊",
+  twitter: "X",
+  reddit: "R",
+  news: "GN",
+  google_news: "GN",
+  bluesky: "BS",
+  affinity: "AI",
+  polymarket: "PM",
   kalshi: "K",
-  search: "🔍",
+  search: "?",
 };
 
 const CATEGORY_LABEL = {
   root: "Root",
+  event: "Event",
   branch: "Branch",
   newBranch: "New branch",
   prediction: "Prediction",
@@ -24,7 +28,9 @@ function nodeSize(category) {
     case "root":
       return 56;
     case "prediction":
-      return 64;
+      return 72;
+    case "event":
+      return 44;
     case "newBranch":
       return 42;
     case "descendant":
@@ -34,49 +40,52 @@ function nodeSize(category) {
   }
 }
 
-/**
- * Kite quadrilateral (symmetric); wing line sits above mid-height so the tail reads
- * longer than a rhombus. Bottom vertex at 50% 100% keeps `faceTowardCenterDeg` toward root.
- */
-const PREDICTION_KITE_SCALE = 2.42;
-/** Taller kite; width stays `size * PREDICTION_KITE_SCALE`. */
-const PREDICTION_KITE_HEIGHT_MULT = 1.28;
+function formatPredictionPercent(sentiment) {
+  const normalized =
+    typeof sentiment === "number" && !Number.isNaN(sentiment) ? sentiment : 0.5;
+  return `${Math.round(normalized * 100)}%`;
+}
 
-function PredictionKiteFace({
+function PredictionRingFace({
   size,
   bg,
   glow,
   hovered,
   revealed,
   icon,
-  iconSize,
+  sentiment,
 }) {
-  const w = size * PREDICTION_KITE_SCALE;
-  const h = w * PREDICTION_KITE_HEIGHT_MULT;
   const glowCss = hovered
-    ? `drop-shadow(0 0 16px ${glow}) drop-shadow(0 0 30px ${glow})`
-    : `drop-shadow(0 0 10px ${glow})`;
+    ? `0 0 22px 8px ${glow}, inset 0 0 0 1px rgba(255,255,255,0.12)`
+    : `0 0 14px 4px ${glow}, inset 0 0 0 1px rgba(255,255,255,0.08)`;
 
   return (
     <div
       style={{
         position: "relative",
-        width: w,
-        height: h,
+        width: size,
+        height: size,
+        borderRadius: "999px",
+        background:
+          "radial-gradient(circle at 30% 28%, rgba(255,255,255,0.24), transparent 42%), rgba(2,6,23,0.9)",
+        border: `2px solid ${bg}`,
+        boxShadow: glowCss,
         transition:
-          "transform 0.42s cubic-bezier(0.34, 1.45, 0.64, 1), filter 0.25s ease",
+          "transform 0.42s cubic-bezier(0.34, 1.45, 0.64, 1), box-shadow 0.25s ease",
         transform: hovered ? "scale(1.1)" : revealed ? "scale(1)" : "scale(0.82)",
-        filter: glowCss,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
         cursor: "pointer",
       }}
     >
       <div
         style={{
           position: "absolute",
-          inset: 0,
-          clipPath:
-            "polygon(50% 0%, 100% 34%, 50% 100%, 0% 34%)",
-          background: bg,
+          inset: 7,
+          borderRadius: "999px",
+          border: `1.5px solid ${bg}AA`,
+          background: `linear-gradient(160deg, ${bg}22, rgba(15,23,42,0.72))`,
         }}
       />
       <div
@@ -84,15 +93,21 @@ function PredictionKiteFace({
           position: "absolute",
           inset: 0,
           display: "flex",
+          flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          paddingBottom: "12%",
-          fontSize: iconSize * 1.22,
+          gap: 4,
+          fontSize: 13,
+          fontWeight: 700,
           lineHeight: 1,
           pointerEvents: "none",
+          color: "#e0f2fe",
         }}
       >
-        {icon}
+        <span style={{ fontSize: 11, letterSpacing: "0.08em" }}>{icon}</span>
+        <span style={{ fontSize: 14, color: "#f8fafc" }}>
+          {formatPredictionPercent(sentiment)}
+        </span>
       </div>
     </div>
   );
@@ -106,10 +121,6 @@ function SentimentNode({ data }) {
   const iconSize = category === "root" ? 20 : 16;
   const revealed = data.reveal !== false;
   const isPrediction = category === "prediction";
-  const faceDeg =
-    typeof data.faceTowardCenterDeg === "number"
-      ? data.faceTowardCenterDeg
-      : 0;
 
   return (
     <div
@@ -131,21 +142,20 @@ function SentimentNode({ data }) {
 
       <div
         style={{
-          transform: isPrediction ? `rotate(${faceDeg}deg)` : undefined,
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
         }}
       >
         {isPrediction ? (
-          <PredictionKiteFace
+          <PredictionRingFace
             size={size}
             bg={bg}
             glow={glow}
             hovered={hovered}
             revealed={revealed}
             icon={SOURCE_ICONS[data.source] ?? "●"}
-            iconSize={iconSize}
+            sentiment={data.sentiment}
           />
         ) : (
           <div
@@ -169,6 +179,8 @@ function SentimentNode({ data }) {
               justifyContent: "center",
               fontSize: iconSize,
               cursor: "pointer",
+              color: category === "root" ? "#111827" : "#0f172a",
+              fontWeight: 700,
             }}
           >
             {SOURCE_ICONS[data.source] ?? "●"}
@@ -181,9 +193,7 @@ function SentimentNode({ data }) {
           style={{
             position: "absolute",
             top:
-              (isPrediction
-                ? size * PREDICTION_KITE_SCALE * PREDICTION_KITE_HEIGHT_MULT
-                : size) + 8,
+              size + 8,
             left: "50%",
             transform: "translateX(-50%)",
             background: "rgba(15,15,20,0.92)",

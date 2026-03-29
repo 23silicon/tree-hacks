@@ -9,6 +9,8 @@ from .config import PipelineConfig
 class Embedder:
     """Generates vector embeddings for raw text items."""
 
+    _MODEL_CACHE: dict[str, SentenceTransformer] = {}
+
     def __init__(self, config: PipelineConfig | None = None) -> None:
         self.config = config or PipelineConfig()
         self._model: SentenceTransformer | None = None
@@ -16,7 +18,10 @@ class Embedder:
     @property
     def model(self) -> SentenceTransformer:
         if self._model is None:
-            self._model = SentenceTransformer(self.config.embedding_model)
+            model_name = self.config.embedding_model
+            if model_name not in self._MODEL_CACHE:
+                self._MODEL_CACHE[model_name] = SentenceTransformer(model_name)
+            self._model = self._MODEL_CACHE[model_name]
         return self._model
 
     def embed_texts(self, texts: list[str]) -> list[list[float]]:
