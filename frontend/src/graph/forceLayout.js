@@ -149,7 +149,7 @@ export function createLayout(
         .strength(linkStrengthAccessor(predIdSet, "rest"))
     )
     .force("charge", forceManyBody().strength(-500))
-    .force("collide", forceCollide(52))
+    .force("collide", forceCollide(84))
     .force(
       "descendantY",
       forceY((d) => (d.category === "descendant" ? cy + 220 : cy)).strength(

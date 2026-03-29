@@ -1,7 +1,12 @@
 export const PREDICTION_SEMICIRCLE = {
   baseRadius: 180,
   radiusPerNode: 40,
-  angleEps: 0.1,
+  /** Padding at arc endpoints so nodes don’t sit on the gap (rad). */
+  angleEps: 0.06,
+  /** Portion of a full circle the predictions occupy (rest is open toward root). */
+  arcCoverage: 0.9,
+  /** Direction of gap center (rad); π/2 = screen-down = toward canvas center from top arc. */
+  gapCenterRad: Math.PI / 2,
 };
 
 export const DESCENDANT_SEMICIRCLE = {
@@ -49,6 +54,63 @@ export function getSortedBranchIds(graphNodes) {
     .map((n) => n.id);
 }
 
+/**
+ * Layers of branch/newBranch ids to reveal in parallel per layer. Uses only
+ * edges between branch-category nodes (e.g. branch-1 → newbranch-1). Root→branch
+ * edges are ignored here so nodes with no internal incoming appear in wave 0 together.
+ */
+export function getBranchRevealWaves(graphNodes, graphEdges) {
+  const branchIds = new Set(
+    graphNodes
+      .filter(
+        (n) =>
+          n.data?.category === "branch" || n.data?.category === "newBranch"
+      )
+      .map((n) => n.id)
+  );
+  if (branchIds.size === 0) return [];
+
+  const internalEdges = graphEdges.filter(
+    (e) => branchIds.has(e.source) && branchIds.has(e.target)
+  );
+
+  const indeg = new Map();
+  for (const id of branchIds) indeg.set(id, 0);
+  for (const e of internalEdges) {
+    indeg.set(e.target, (indeg.get(e.target) ?? 0) + 1);
+  }
+
+  const ts = (id) => {
+    const n = graphNodes.find((x) => x.id === id);
+    return n?.data?.timestamp
+      ? new Date(n.data.timestamp).getTime()
+      : 0;
+  };
+
+  const waves = [];
+  const remaining = new Set(branchIds);
+
+  while (remaining.size > 0) {
+    const layer = [...remaining].filter((id) => indeg.get(id) === 0);
+    if (layer.length === 0) break;
+    layer.sort((a, b) => ts(a) - ts(b));
+    waves.push(layer);
+
+    for (const id of layer) {
+      remaining.delete(id);
+    }
+    for (const id of layer) {
+      for (const e of internalEdges) {
+        if (e.source === id) {
+          indeg.set(e.target, (indeg.get(e.target) ?? 0) - 1);
+        }
+      }
+    }
+  }
+
+  return waves;
+}
+
 export function getBranchNodeCount(graphNodes) {
   return graphNodes.filter(
     (n) =>
@@ -82,7 +144,8 @@ export function getPredictionSemicircleTargets(
   radiusPx
 ) {
   const ids = getPredictionNodeIds(graphNodes);
-  const { baseRadius, radiusPerNode, angleEps } = PREDICTION_SEMICIRCLE;
+  const { baseRadius, radiusPerNode, angleEps, arcCoverage, gapCenterRad } =
+    PREDICTION_SEMICIRCLE;
 
   const n = ids.length;
   const radius =
@@ -92,15 +155,18 @@ export function getPredictionSemicircleTargets(
 
   const cx = originX;
   const cy = originY;
-  const start = Math.PI + angleEps;
-  const end = 2 * Math.PI - angleEps;
+
+  const gap = (1 - arcCoverage) * 2 * Math.PI;
+  const sweep = arcCoverage * 2 * Math.PI;
+  const start = gapCenterRad + gap / 2;
+  const end = start + sweep;
+  const t0 = start + angleEps;
+  const t1 = end - angleEps;
 
   const map = new Map();
   for (let i = 0; i < n; i++) {
     const theta =
-      n === 1
-        ? (3 * Math.PI) / 2
-        : start + (i / (n - 1)) * (end - start);
+      n === 1 ? (t0 + t1) / 2 : t0 + (i / (n - 1)) * (t1 - t0);
 
     map.set(ids[i], {
       x: cx + radius * Math.cos(theta),

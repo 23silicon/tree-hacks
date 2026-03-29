@@ -1,201 +1,167 @@
 /**
- * Fixture graph using SentimentTree node categories:
- *   root        — question/event all forward branches start from
- *   branch      — past events (older than recent window)
- *   newBranch   — branch events within `newBranchDays` of reference “today”
- *   prediction  — future / not yet occurred
- *   descendant  — historical chain leading *to* the root (what led here)
+ * Graph fixture built from repo `sentiment-tree/` JSON (Polymarket + event scrapes).
+ * Categories: root, descendant, branch, newBranch, prediction — see groupColors / predictionLayout.
  */
 
-/** Reference “today” for demo (recent vs older branch split). */
-export const SAMPLE_TODAY = "2026-03-28T12:00:00Z";
+import polymarketData from "@sentiment-tree/polymarket_preds.json";
+import eventsData from "@sentiment-tree/events_example.json";
+
+export const SAMPLE_TODAY = "2025-03-28T12:00:00Z";
 export const NEW_BRANCH_DAYS = 7;
 
+function fmtVol(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(0)}k`;
+  return String(n);
+}
+
+function shortQuestion(q, max = 78) {
+  if (!q || q.length <= max) return q;
+  return `${q.slice(0, max - 1)}…`;
+}
+
+function buildDescendants(events) {
+  const evs = Array.isArray(events) ? [...events].sort((a, b) => a.ID - b.ID) : [];
+  const timestamps = ["2024-06-15T12:00:00Z", "2025-02-10T12:00:00Z"];
+  return evs.map((ev, i) => {
+    const src = ev.Sources?.[0];
+    const summary = [ev.Description, src?.Summary].filter(Boolean).join(" — ");
+    return {
+      id: `desc-${i + 1}`,
+      data: {
+        label: ev.Title,
+        category: "descendant",
+        sentiment: 0.42 + i * 0.06,
+        source: "news",
+        timestamp: timestamps[i] ?? timestamps[timestamps.length - 1],
+        summary: summary || ev.Title,
+      },
+    };
+  });
+}
+
+function buildPredictionNodes(preds) {
+  return preds.map((p) => ({
+    id: p.id,
+    data: {
+      label: shortQuestion(p.question, 80),
+      category: "prediction",
+      sentiment: p.yes_probability,
+      source: p.source === "kalshi" ? "kalshi" : "polymarket",
+      timestamp: p.closes_at,
+      summary: `${p.category} · Yes ${(p.yes_probability * 100).toFixed(0)}% · Vol $${fmtVol(p.volume_usd)} · Liq $${fmtVol(p.liquidity_usd)}`,
+    },
+  }));
+}
+
+function buildBranchLayer(preds) {
+  const byCat = (cat) => preds.find((p) => p.category === cat);
+  const military = byCat("military");
+  const diplomatic = preds.find((p) => p.category === "diplomatic");
+  const economic = preds.find((p) => p.category === "economic");
+
+  const branches = [
+    {
+      id: "branch-1",
+      label: military ? shortQuestion(military.question, 72) : "Military scenario",
+      sentiment: military?.yes_probability ?? 0.4,
+      timestamp: "2025-01-08T14:00:00Z",
+    },
+    {
+      id: "branch-2",
+      label: diplomatic ? shortQuestion(diplomatic.question, 72) : "Diplomatic scenario",
+      sentiment: diplomatic?.yes_probability ?? 0.35,
+      timestamp: "2025-02-03T11:00:00Z",
+    },
+    {
+      id: "branch-3",
+      label: economic ? shortQuestion(economic.question, 72) : "Economic scenario",
+      sentiment: economic?.yes_probability ?? 0.3,
+      timestamp: "2025-02-19T09:30:00Z",
+    },
+  ];
+
+  const nbA = preds.find((p) => p.id === "pm_006");
+  const nbB = preds.find((p) => p.id === "pm_001");
+  const newBranches = [
+    {
+      id: "newbranch-1",
+      label: nbA ? shortQuestion(nbA.question, 72) : "Near-term policy",
+      sentiment: nbA?.yes_probability ?? 0.55,
+      timestamp: "2025-03-22T08:30:00Z",
+    },
+    {
+      id: "newbranch-2",
+      label: nbB ? shortQuestion(nbB.question, 72) : "Summer risk window",
+      sentiment: nbB?.yes_probability ?? 0.4,
+      timestamp: "2025-03-26T15:00:00Z",
+    },
+  ];
+
+  const toNode = (b, cat) => ({
+    id: b.id,
+    data: {
+      label: b.label,
+      category: cat,
+      sentiment: b.sentiment,
+      source: "news",
+      timestamp: b.timestamp,
+      summary: `Narrative branch aligned with query “${polymarketData.query}”.`,
+    },
+  });
+
+  return {
+    branches: branches.map((b) => toNode(b, "branch")),
+    newBranches: newBranches.map((b) => toNode(b, "newBranch")),
+  };
+}
+
+function buildEdges(descendants) {
+  const edges = [];
+  for (let i = 0; i < descendants.length - 1; i++) {
+    const a = descendants[i].id;
+    const b = descendants[i + 1].id;
+    edges.push({ id: `e-${a}-${b}`, source: a, target: b });
+  }
+  if (descendants.length > 0) {
+    const last = descendants[descendants.length - 1].id;
+    edges.push({ id: `e-${last}-root`, source: last, target: "root" });
+  }
+
+  const branchIds = ["branch-1", "branch-2", "branch-3", "newbranch-1", "newbranch-2"];
+  for (const bid of branchIds) {
+    edges.push({ id: `e-root-${bid}`, source: "root", target: bid });
+  }
+  edges.push({ id: "e-b1-nb1", source: "branch-1", target: "newbranch-1" });
+  return edges;
+}
+
+const preds = polymarketData.predictions ?? [];
+const descendants = buildDescendants(eventsData);
+const { branches, newBranches } = buildBranchLayer(preds);
+
+const rootNode = {
+  id: "root",
+  data: {
+    label: polymarketData.query,
+    category: "root",
+    sentiment: 0.5,
+    source: "search",
+    timestamp: polymarketData.fetched_at,
+    summary: `Live search focus — ${preds.length} Polymarket/Kalshi contracts linked (fetched ${polymarketData.fetched_at.slice(0, 10)}).`,
+  },
+};
+
+const predictionNodes = buildPredictionNodes(preds);
+
 const sampleNodes = [
-  // ── Descendants: historical timeline → root ─────────────────────────
-  {
-    id: "desc-1",
-    data: {
-      label: "2022: Fed aggressive hiking cycle begins",
-      category: "descendant",
-      sentiment: 0.35,
-      source: "news",
-      timestamp: "2022-03-16T14:00:00Z",
-      summary:
-        "First 25bp hike — start of the fastest tightening in decades; sets baseline for later labor and inflation debates.",
-    },
-  },
-  {
-    id: "desc-2",
-    data: {
-      label: "2024: Soft landing narrative takes hold",
-      category: "descendant",
-      sentiment: 0.55,
-      source: "news",
-      timestamp: "2024-08-01T09:00:00Z",
-      summary:
-        "Disinflation without deep recession — consensus shifts; frames how markets read each subsequent jobs print.",
-    },
-  },
-  {
-    id: "desc-3",
-    data: {
-      label: "Early 2026: Labor market still tight",
-      category: "descendant",
-      sentiment: 0.48,
-      source: "reddit",
-      timestamp: "2026-02-01T12:00:00Z",
-      summary:
-        "Historical context immediately before the root question: job openings elevated, quit rate normalized.",
-    },
-  },
-
-  // ── Root: question / event under exploration ─────────────────────────
-  {
-    id: "root",
-    data: {
-      label: "Will the US enter a recession before 2027?",
-      category: "root",
-      sentiment: 0.5,
-      source: "search",
-      timestamp: "2026-03-15T00:00:00Z",
-      summary:
-        "Root query — branches explore live discourse; descendants show what historically led to this framing.",
-    },
-  },
-
-  // ── Branch nodes: older events (before recent window) ─────────────────
-  {
-    id: "branch-1",
-    data: {
-      label: "January CPI above expectations",
-      category: "branch",
-      sentiment: 0.32,
-      source: "news",
-      timestamp: "2026-01-14T08:30:00Z",
-      summary:
-        "Headline inflation sticky — branches the inflation narrative from the root.",
-    },
-  },
-  {
-    id: "branch-2",
-    data: {
-      label: "Q4 earnings: consumer resilient",
-      category: "branch",
-      sentiment: 0.68,
-      source: "news",
-      timestamp: "2026-02-10T16:00:00Z",
-      summary:
-        "Equities rally on guidance — older branch feeding the growth vs recession debate.",
-    },
-  },
-  {
-    id: "branch-3",
-    data: {
-      label: "Regional bank stress headlines",
-      category: "branch",
-      sentiment: 0.28,
-      source: "twitter",
-      timestamp: "2026-02-22T11:00:00Z",
-      summary:
-        "Credit concerns resurface — branch split toward financial stability worries.",
-    },
-  },
-
-  // ── New branch nodes: within NEW_BRANCH_DAYS of SAMPLE_TODAY ──────────
-  {
-    id: "newbranch-1",
-    data: {
-      label: "March jobs report surprise",
-      category: "newBranch",
-      sentiment: 0.62,
-      source: "news",
-      timestamp: "2026-03-22T08:30:00Z",
-      summary:
-        "Strong payrolls — fresh branch activity; occurred within the recent window.",
-    },
-  },
-  {
-    id: "newbranch-2",
-    data: {
-      label: "Fed speakers lean hawkish",
-      category: "newBranch",
-      sentiment: 0.4,
-      source: "twitter",
-      timestamp: "2026-03-26T15:00:00Z",
-      summary:
-        "Last-moment narrative shift before “today” — tagged as new branch.",
-    },
-  },
-
-  // ── Prediction nodes: future / not yet resolved ───────────────────────
-  {
-    id: "pred-1",
-    data: {
-      label: "FOMC decision (June 2026)",
-      category: "prediction",
-      sentiment: 0.52,
-      source: "polymarket",
-      timestamp: "2026-06-17T18:00:00Z",
-      summary:
-        "Scheduled outcome not yet realized — prediction node; market-implied path.",
-    },
-  },
-  {
-    id: "pred-2",
-    data: {
-      label: "Q3 GDP first print",
-      category: "prediction",
-      sentiment: 0.45,
-      source: "polymarket",
-      timestamp: "2026-10-29T12:00:00Z",
-      summary:
-        "Future data release — branches may converge on recession call here.",
-    },
-  },
-  {
-    id: "pred-3",
-    data: {
-      label: "Unemployment hits 5%?",
-      category: "prediction",
-      sentiment: 0.33,
-      source: "kalshi",
-      timestamp: "2026-08-14T12:00:00Z",
-      summary:
-        "Kalshi contract on U-3 unemployment crossing 5% before year-end — bearish labor signal.",
-    },
-  },
-  {
-    id: "pred-4",
-    data: {
-      label: "S&P 500 correction >15%",
-      category: "prediction",
-      sentiment: 0.28,
-      source: "polymarket",
-      timestamp: "2026-09-30T16:00:00Z",
-      summary:
-        "Polymarket contract on a peak-to-trough drawdown exceeding 15% before Q4 close.",
-    },
-  },
+  ...descendants,
+  rootNode,
+  ...branches,
+  ...newBranches,
+  ...predictionNodes,
 ];
 
-const sampleEdges = [
-  // Historical chain → root
-  { id: "e-desc1-desc2", source: "desc-1", target: "desc-2" },
-  { id: "e-desc2-desc3", source: "desc-2", target: "desc-3" },
-  { id: "e-desc3-root", source: "desc-3", target: "root" },
-
-  // Root → branches (older)
-  { id: "e-root-b1", source: "root", target: "branch-1" },
-  { id: "e-root-b2", source: "root", target: "branch-2" },
-  { id: "e-root-b3", source: "root", target: "branch-3" },
-
-  // Root → recent branches
-  { id: "e-root-nb1", source: "root", target: "newbranch-1" },
-  { id: "e-root-nb2", source: "root", target: "newbranch-2" },
-
-  // branch ↔ newBranch only (predictions are visually separate for now)
-  { id: "e-b1-nb1", source: "branch-1", target: "newbranch-1" },
-];
+const sampleEdges = buildEdges(descendants);
 
 export { sampleNodes, sampleEdges };

@@ -26,7 +26,7 @@ import {
   getPredictionArcRadiusPx,
   getPredictionNodeIds,
   getSortedDescendantIds,
-  getSortedBranchIds,
+  getBranchRevealWaves,
 } from "./predictionLayout";
 
 const nodeTypes = { sentiment: SentimentNode };
@@ -38,10 +38,9 @@ const CANVAS_H = 800;
 const ARC_SLIDER_MAX = 100;
 const ARC_SLIDER_STEP = 2;
 
-/** Reset-view reveal: node fades in, then incident edges after a beat. */
-const REVEAL_NODE_MS = 340;
-const REVEAL_LINK_AFTER_MS = 220;
-const REVEAL_STEP_GAP_MS = 90;
+/** Reset-view: one visibility set — edges show when both ends are visible. */
+const REVEAL_DESCENDANT_STEP_MS = 300;
+const REVEAL_BRANCH_WAVE_MS = 320;
 
 const ROOT_RETURN_RATE = 0.065;
 const ROOT_HOME_EPS = 1.25;
@@ -77,16 +76,27 @@ function initSimulationBundle(layoutParamsRef) {
 const allGraphNodeIds = new Set(sampleNodes.map((n) => n.id));
 
 function buildFlowNodes(simNodes, revealedIds) {
+  const cx = CANVAS_W / 2;
+  const cy = CANVAS_H / 2;
   return sampleNodes.map((n) => {
     const sn = simNodes.find((s) => s.id === n.id);
     const revealed = revealedIds.has(n.id);
+    const data = { ...n.data, reveal: revealed };
+    if (n.data?.category === "prediction") {
+      const dx = cx - sn.x;
+      const dy = cy - sn.y;
+      data.faceTowardCenterDeg =
+        Math.hypot(dx, dy) > 1e-6
+          ? (Math.atan2(dy, dx) * 180) / Math.PI - 90
+          : 0;
+    }
     return {
       id: n.id,
       type: "sentiment",
       position: { x: sn.x, y: sn.y },
       // Do not set `style.transform` on nodes — React Flow uses transform for
       // translate(x,y); overriding it stacks every node at the origin.
-      data: { ...n.data, reveal: revealed },
+      data,
       draggable: true,
       style: {
         opacity: revealed ? 1 : 0,
@@ -121,14 +131,14 @@ function ResetViewButton({ onResetLayout }) {
   );
 }
 
-function buildFlowEdges(linkedIds) {
+function buildFlowEdges(visibleIds) {
   return sampleEdges.map((e) => {
     const sourceNode = sampleNodes.find((n) => n.id === e.source);
     const targetNode = sampleNodes.find((n) => n.id === e.target);
     const c = colorsFor(sourceNode?.data?.category ?? "branch");
     const targetCategory = targetNode?.data?.category;
-    const linked =
-      linkedIds.has(e.source) && linkedIds.has(e.target);
+    const visible =
+      visibleIds.has(e.source) && visibleIds.has(e.target);
     return {
       id: e.id,
       type: "circleIntersect",
@@ -137,10 +147,10 @@ function buildFlowEdges(linkedIds) {
       style: {
         stroke: c.edge,
         strokeWidth: 2,
-        opacity: linked ? 1 : 0,
-        transition: "opacity 0.5s ease",
+        opacity: visible ? 1 : 0,
+        transition: "opacity 0.48s ease",
       },
-      animated: linked && targetCategory === "prediction",
+      animated: visible && targetCategory === "prediction",
     };
   });
 }
@@ -174,11 +184,26 @@ export default function GraphCanvas() {
 
   const applySimPositions = useCallback(
     (pinnedId) => {
+      const cx = CANVAS_W / 2;
+      const cy = CANVAS_H / 2;
       setNodes((prev) =>
         prev.map((n) => {
           if (n.id === pinnedId) return n;
           const sn = simNodes.find((s) => s.id === n.id);
           if (!sn) return n;
+          if (n.data?.category === "prediction") {
+            const dx = cx - sn.x;
+            const dy = cy - sn.y;
+            const deg =
+              Math.hypot(dx, dy) > 1e-6
+                ? (Math.atan2(dy, dx) * 180) / Math.PI - 90
+                : 0;
+            return {
+              ...n,
+              position: { x: sn.x, y: sn.y },
+              data: { ...n.data, faceTowardCenterDeg: deg },
+            };
+          }
           return { ...n, position: { x: sn.x, y: sn.y } };
         })
       );
@@ -363,11 +388,15 @@ export default function GraphCanvas() {
 
     const rootId = "root";
     const predIds = getPredictionNodeIds(sampleNodes);
-    const revealed = new Set([rootId, ...predIds]);
-    const linked = new Set([rootId, ...predIds]);
+    /** Nodes that are visible; any edge is shown iff both endpoints are in this set. */
+    const visible = new Set([rootId, ...predIds]);
 
-    setNodes(buildFlowNodes(simNodes, revealed));
-    setEdges(buildFlowEdges(linked));
+    const flush = () => {
+      setNodes(buildFlowNodes(simNodes, visible));
+      setEdges(buildFlowEdges(visible));
+    };
+
+    flush();
 
     const rf = reactFlowInstanceRef.current;
     requestAnimationFrame(() => {
@@ -380,22 +409,27 @@ export default function GraphCanvas() {
       });
 
     const descendantIds = getSortedDescendantIds(sampleNodes);
-    const branchIds = getSortedBranchIds(sampleNodes);
-    const sequence = [...descendantIds, ...branchIds];
+    const branchWaves = getBranchRevealWaves(sampleNodes, sampleEdges);
 
     (async () => {
       await wait(120);
       if (gen !== resetAnimGenRef.current) return;
 
-      for (const id of sequence) {
+      for (const id of descendantIds) {
         if (gen !== resetAnimGenRef.current) return;
-        revealed.add(id);
-        setNodes(buildFlowNodes(simNodes, revealed));
-        await wait(REVEAL_NODE_MS);
+        visible.add(id);
+        flush();
+        await wait(REVEAL_DESCENDANT_STEP_MS);
         if (gen !== resetAnimGenRef.current) return;
-        linked.add(id);
-        setEdges(buildFlowEdges(linked));
-        await wait(REVEAL_LINK_AFTER_MS + REVEAL_STEP_GAP_MS);
+      }
+
+      for (const layer of branchWaves) {
+        if (gen !== resetAnimGenRef.current) return;
+        for (const id of layer) {
+          visible.add(id);
+        }
+        flush();
+        await wait(REVEAL_BRANCH_WAVE_MS);
         if (gen !== resetAnimGenRef.current) return;
       }
 

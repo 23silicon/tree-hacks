@@ -11,6 +11,7 @@ export default defineConfig({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@sentiment-tree": path.resolve(__dirname, "../sentiment-tree"),
     },
     dedupe: ["react", "react-dom"],
   },
