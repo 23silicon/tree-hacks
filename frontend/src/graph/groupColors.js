@@ -1,4 +1,4 @@
-/** Semantic node categories for SentimentTree (see claude.md). */
+/** Semantic node categories for Sentimentree (see claude.md). */
 const nodeCategoryColors = {
   /** Initial question/event — all forward branches start here */
   root: {

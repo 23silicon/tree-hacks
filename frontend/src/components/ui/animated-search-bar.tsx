@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import type { ChangeEvent } from "react";
+import type { ChangeEvent, KeyboardEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import clsx from "clsx";
 
@@ -286,7 +286,12 @@ type SearchState = {
   isLoading: boolean;
 };
 
-export const GooeySearchBar = () => {
+type GooeySearchBarProps = {
+  /** Landing page: jump to graph after search (Enter or picking a result). */
+  onEnterGraph?: () => void;
+};
+
+export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [state, setState] = useState<SearchState>({
@@ -305,6 +310,12 @@ export const GooeySearchBar = () => {
 
   const handleSearch = (e: ChangeEvent<HTMLInputElement>) => {
     setState((prevState) => ({ ...prevState, searchText: e.target.value }));
+  };
+
+  const handleInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && state.searchText.trim() !== "") {
+      onEnterGraph?.();
+    }
   };
 
   useEffect(() => {
@@ -399,6 +410,7 @@ export const GooeySearchBar = () => {
                     transition={getResultItemTransition(index)}
                     className="search-result"
                     role="option"
+                    onClick={() => onEnterGraph?.()}
                   >
                     <div className="search-result-title">
                       <InfoIcon index={index} />
@@ -434,6 +446,7 @@ export const GooeySearchBar = () => {
                 placeholder="Type R..."
                 aria-label="Search input"
                 onChange={handleSearch}
+                onKeyDown={handleInputKeyDown}
               />
             )}
           </motion.div>

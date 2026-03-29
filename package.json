@@ -1,14 +1,14 @@
 {
-  "name": "tree-hacks",
+  "name": "sentimentree",
   "private": true,
   "workspaces": [
     "frontend"
   ],
   "scripts": {
-    "dev": "npm run dev -w frontend",
-    "build": "npm run build -w frontend",
-    "lint": "npm run lint -w frontend",
-    "preview": "npm run preview -w frontend"
+    "dev": "npm run dev -w sentimentree",
+    "build": "npm run build -w sentimentree",
+    "lint": "npm run lint -w sentimentree",
+    "preview": "npm run preview -w sentimentree"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.2.2",

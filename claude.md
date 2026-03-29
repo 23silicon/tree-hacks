@@ -1,10 +1,10 @@
 Project Structure and Idea 
 
 —------------------------------------------------------------------------
-# Tree Hacks: public sentiment search engine 
+# Sentimentree: public sentiment search engine 
 An OpenClaw-powered search engine deploys agents to timeline and reveal public sentiment 
 Shows how sentiment evolves and is an aggregate for current news 
-SentimentTree is a visual exploration tool that maps how public sentiment across internet / social platforms chronologically (we use polymarket and kalshi to source initial predictions)
+Sentimentree is a visual exploration tool that maps how public sentiment across internet / social platforms chronologically (we use polymarket and kalshi to source initial predictions)
 
 ### Features 
 Novel graph view that branches from initial search (root node)
