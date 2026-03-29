@@ -767,7 +767,10 @@ export default function GraphCanvas({ payload, selectedNodeId, onSelectNode }) {
   });
   const [arcSliderPercent, setArcSliderPercent] = useState(ARC_SLIDER_MAX);
   const activePredictionId = useMemo(() => {
-    if (!selectedNodeCategory) {
+    if (
+      selectedNodeCategory !== "prediction" &&
+      selectedNodeCategory !== "event"
+    ) {
       return null;
     }
     return selectedNodeId;

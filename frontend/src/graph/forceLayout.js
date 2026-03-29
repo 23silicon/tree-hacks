@@ -69,7 +69,12 @@ export function createLayout(
     cy,
     radiusPx()
   );
-  const eventTargetsInitial = getEventLaneTargets(graphNodes, width, height);
+  const eventTargetsInitial = getEventLaneTargets(
+    graphNodes,
+    width,
+    height,
+    radiusPx()
+  );
   const predIdSet = new Set(predTargetsInitial.keys());
 
   const simNodes = graphNodes.map((node) => {
@@ -112,6 +117,7 @@ export function createLayout(
   let predTargetCache = null;
   let predCacheRadius = null;
   let eventTargetCache = null;
+  let eventCacheRadius = null;
   function predictionTargetXY(d) {
     if (!predIdSet.has(d.id)) return { x: d.x, y: d.y };
     const r = radiusPx();
@@ -128,8 +134,10 @@ export function createLayout(
   }
   function eventTargetXY(d) {
     if (d.category !== "event") return { x: d.x, y: d.y };
-    if (!eventTargetCache) {
-      eventTargetCache = getEventLaneTargets(graphNodes, width, height);
+    const r = radiusPx();
+    if (eventCacheRadius !== r || !eventTargetCache) {
+      eventTargetCache = getEventLaneTargets(graphNodes, width, height, r);
+      eventCacheRadius = r;
     }
     return eventTargetCache.get(d.id) ?? { x: d.x, y: d.y };
   }
