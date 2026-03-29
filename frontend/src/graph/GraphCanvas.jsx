@@ -25,8 +25,6 @@ import {
   getBranchNodeCount,
   getPredictionArcRadiusPx,
   getPredictionNodeIds,
-  getSortedDescendantIds,
-  getBranchRevealWaves,
 } from "./predictionLayout";
 
 const nodeTypes = { sentiment: SentimentNode };
@@ -39,8 +37,7 @@ const ARC_SLIDER_MAX = 100;
 const ARC_SLIDER_STEP = 2;
 
 /** Reset-view: one visibility set — edges show when both ends are visible. */
-const REVEAL_DESCENDANT_STEP_MS = 300;
-const REVEAL_BRANCH_WAVE_MS = 320;
+const REVEAL_CHRONO_STEP_MS_SLOW = 340;
 
 const ROOT_RETURN_RATE = 0.065;
 const ROOT_HOME_EPS = 1.25;
@@ -74,6 +71,76 @@ function initSimulationBundle(layoutParamsRef) {
 }
 
 const allGraphNodeIds = new Set(sampleNodes.map((n) => n.id));
+
+const nodeById = new Map(sampleNodes.map((n) => [n.id, n]));
+const neighborsById = (() => {
+  const map = new Map(sampleNodes.map((n) => [n.id, new Set()]));
+  for (const e of sampleEdges) {
+    map.get(e.source)?.add(e.target);
+    map.get(e.target)?.add(e.source);
+  }
+  return map;
+})();
+
+function nodeTimeMs(id) {
+  const ts = nodeById.get(id)?.data?.timestamp;
+  if (!ts) return Number.POSITIVE_INFINITY;
+  const t = new Date(ts).getTime();
+  return Number.isFinite(t) ? t : Number.POSITIVE_INFINITY;
+}
+
+function chronologicalRevealIds() {
+  return sampleNodes
+    .filter((n) => n.id !== "root")
+    .sort((a, b) => {
+      const dt = nodeTimeMs(a.id) - nodeTimeMs(b.id);
+      if (dt !== 0) return dt;
+      if (a.data?.category === "prediction" && b.data?.category !== "prediction") {
+        return 1;
+      }
+      if (b.data?.category === "prediction" && a.data?.category !== "prediction") {
+        return -1;
+      }
+      return String(a.id).localeCompare(String(b.id));
+    })
+    .map((n) => n.id);
+}
+
+function hash01FromString(s) {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967295;
+}
+
+function spawnOffsetFor(id, targetX, targetY, cx, cy) {
+  const ux = targetX - cx;
+  const uy = targetY - cy;
+  const len = Math.hypot(ux, uy);
+  const nx = len > 1e-5 ? ux / len : 1;
+  const ny = len > 1e-5 ? uy / len : 0;
+  const tx = -ny;
+  const ty = nx;
+
+  const hA = hash01FromString(`${id}-a`);
+  const hB = hash01FromString(`${id}-b`);
+  const radial = 180 + hA * 120;
+  const tangent = (hB - 0.5) * 160;
+
+  return {
+    x: targetX + nx * radial + tx * tangent,
+    y: targetY + ny * radial + ty * tangent,
+  };
+}
+
+function kickTowardTarget(sn, target, intensity = 1) {
+  const dx = target.x - sn.x;
+  const dy = target.y - sn.y;
+  sn.vx = dx * (0.012 * intensity);
+  sn.vy = dy * (0.012 * intensity);
+}
 
 function buildFlowNodes(simNodes, revealedIds) {
   const cx = CANVAS_W / 2;
@@ -390,6 +457,8 @@ export default function GraphCanvas() {
     const predIds = getPredictionNodeIds(sampleNodes);
     /** Nodes that are visible; any edge is shown iff both endpoints are in this set. */
     const visible = new Set([rootId, ...predIds]);
+    const pendingLinkKick = new Set();
+    const targetById = new Map(simNodes.map((sn) => [sn.id, { x: sn.x, y: sn.y }]));
 
     const flush = () => {
       setNodes(buildFlowNodes(simNodes, visible));
@@ -408,29 +477,54 @@ export default function GraphCanvas() {
         setTimeout(resolve, ms);
       });
 
-    const descendantIds = getSortedDescendantIds(sampleNodes);
-    const branchWaves = getBranchRevealWaves(sampleNodes, sampleEdges);
+    const revealIds = chronologicalRevealIds().filter((id) => {
+      const cat = nodeById.get(id)?.data?.category;
+      return cat !== "prediction";
+    });
 
     (async () => {
       await wait(120);
       if (gen !== resetAnimGenRef.current) return;
 
-      for (const id of descendantIds) {
+      for (const id of revealIds) {
         if (gen !== resetAnimGenRef.current) return;
-        visible.add(id);
-        flush();
-        await wait(REVEAL_DESCENDANT_STEP_MS);
-        if (gen !== resetAnimGenRef.current) return;
-      }
 
-      for (const layer of branchWaves) {
-        if (gen !== resetAnimGenRef.current) return;
-        for (const id of layer) {
-          visible.add(id);
+        const sn = simNodes.find((s) => s.id === id);
+        const target = targetById.get(id);
+        if (!sn || !target) continue;
+
+        const spawn = spawnOffsetFor(id, target.x, target.y, CANVAS_W / 2, CANVAS_H / 2);
+        sn.x = spawn.x;
+        sn.y = spawn.y;
+        sn.fx = null;
+        sn.fy = null;
+
+        visible.add(id);
+
+        const neighbors = neighborsById.get(id) ?? new Set();
+        const hasVisibleNeighbor = [...neighbors].some((nid) => visible.has(nid));
+        if (hasVisibleNeighbor) {
+          kickTowardTarget(sn, target, 1.4);
+        } else {
+          pendingLinkKick.add(id);
         }
+
+        for (const nid of neighbors) {
+          if (!visible.has(nid) || !pendingLinkKick.has(nid)) continue;
+          const peer = simNodes.find((s) => s.id === nid);
+          const peerTarget = targetById.get(nid);
+          if (!peer || !peerTarget) continue;
+          kickTowardTarget(peer, peerTarget, 1.25);
+          pendingLinkKick.delete(nid);
+        }
+
         flush();
-        await wait(REVEAL_BRANCH_WAVE_MS);
-        if (gen !== resetAnimGenRef.current) return;
+        simulation.alpha(Math.max(simulation.alpha(), 0.44));
+        if (!rafRef.current) {
+          rafRef.current = requestAnimationFrame(tickLoop);
+        }
+
+        await wait(REVEAL_CHRONO_STEP_MS_SLOW);
       }
 
       requestAnimationFrame(() => {
@@ -438,7 +532,7 @@ export default function GraphCanvas() {
         reactFlowInstanceRef.current?.fitView({ padding: 0.18, duration: 520 });
       });
     })();
-  }, [simulation, simNodes, predIdSet, setNodes, setEdges]);
+  }, [simulation, simNodes, predIdSet, setNodes, setEdges, tickLoop]);
 
   return (
     <div style={{ width: "100%", height: "100%" }}>

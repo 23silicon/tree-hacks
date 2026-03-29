@@ -3,13 +3,25 @@ import { Handle, Position } from "@xyflow/react";
 import { colorsFor } from "./groupColors";
 
 const SOURCE_ICONS = {
-  twitter: "𝕏",
-  reddit: "⬡",
-  news: "📰",
-  polymarket: "📊",
+  twitter: "X",
+  reddit: "R",
+  news: "N",
+  polymarket: "P",
   kalshi: "K",
-  search: "🔍",
+  search: "S",
 };
+
+const SOURCE_LABELS = {
+  twitter: "Twitter",
+  reddit: "Reddit",
+  news: "News",
+  polymarket: "Polymarket",
+  kalshi: "Kalshi",
+  search: "Search",
+};
+
+const LEAF_PREDICTION_SPRITE = "/leaf-pixel-template.png";
+const LEAF_PREDICTION_MIMIC_SPRITE = "/leaf2.png";
 
 const CATEGORY_LABEL = {
   root: "Root",
@@ -34,28 +46,24 @@ function nodeSize(category) {
   }
 }
 
-/**
- * Kite quadrilateral (symmetric); wing line sits above mid-height so the tail reads
- * longer than a rhombus. Bottom vertex at 50% 100% keeps `faceTowardCenterDeg` toward root.
- */
-const PREDICTION_KITE_SCALE = 2.42;
-/** Taller kite; width stays `size * PREDICTION_KITE_SCALE`. */
-const PREDICTION_KITE_HEIGHT_MULT = 1.28;
+/** Prediction leaves render larger than branch nodes for readability in dense layouts. */
+const PREDICTION_LEAF_WIDTH_MULT = 2.12;
+const PREDICTION_LEAF_HEIGHT_MULT = 1.34;
 
-function PredictionKiteFace({
+function PredictionLeafFace({
   size,
   bg,
   glow,
   hovered,
   revealed,
-  icon,
-  iconSize,
+  source,
 }) {
-  const w = size * PREDICTION_KITE_SCALE;
-  const h = w * PREDICTION_KITE_HEIGHT_MULT;
+  const w = size * PREDICTION_LEAF_WIDTH_MULT;
+  const h = size * PREDICTION_LEAF_HEIGHT_MULT;
   const glowCss = hovered
     ? `drop-shadow(0 0 16px ${glow}) drop-shadow(0 0 30px ${glow})`
     : `drop-shadow(0 0 10px ${glow})`;
+  const sprite = source === "kalshi" ? LEAF_PREDICTION_MIMIC_SPRITE : LEAF_PREDICTION_SPRITE;
 
   return (
     <div
@@ -70,30 +78,26 @@ function PredictionKiteFace({
         cursor: "pointer",
       }}
     >
-      <div
+      <img
+        src={sprite}
+        alt=""
+        draggable={false}
         style={{
-          position: "absolute",
-          inset: 0,
-          clipPath:
-            "polygon(50% 0%, 100% 34%, 50% 100%, 0% 34%)",
-          background: bg,
-        }}
-      />
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          paddingBottom: "12%",
-          fontSize: iconSize * 1.22,
-          lineHeight: 1,
+          width: "100%",
+          height: "100%",
+          objectFit: "contain",
+          imageRendering: "pixelated",
+          filter: [
+            "saturate(1.1) brightness(1.02)",
+            "hue-rotate(6deg)",
+            `drop-shadow(0 0 8px ${bg}88)`,
+            "drop-shadow(0 6px 14px rgba(34,197,94,0.22))",
+          ].join(" "),
+          transform: "scale(1.02)",
+          transformOrigin: "center center",
           pointerEvents: "none",
         }}
-      >
-        {icon}
-      </div>
+      />
     </div>
   );
 }
@@ -129,25 +133,57 @@ function SentimentNode({ data }) {
         style={{ opacity: 0, pointerEvents: "none", width: 1, height: 1 }}
       />
 
-      <div
-        style={{
-          transform: isPrediction ? `rotate(${faceDeg}deg)` : undefined,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        {isPrediction ? (
-          <PredictionKiteFace
+      {isPrediction ? (
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 4,
+          }}
+        >
+          <div
+            style={{
+              transform: `rotate(${faceDeg}deg)`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+          <PredictionLeafFace
             size={size}
             bg={bg}
             glow={glow}
             hovered={hovered}
             revealed={revealed}
-            icon={SOURCE_ICONS[data.source] ?? "●"}
-            iconSize={iconSize}
+            source={data.source}
           />
-        ) : (
+          </div>
+          <div
+            style={{
+              fontSize: 12,
+              lineHeight: 1,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              fontWeight: 700,
+              color: hovered ? "#f8fafc" : "#e2e8f0",
+              textShadow: "0 1px 6px rgba(2, 6, 23, 0.7)",
+              pointerEvents: "none",
+              userSelect: "none",
+            }}
+          >
+            {SOURCE_LABELS[data.source] ?? "Source"}
+          </div>
+        </div>
+      ) : (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
           <div
             style={{
               width: size,
@@ -171,10 +207,10 @@ function SentimentNode({ data }) {
               cursor: "pointer",
             }}
           >
-            {SOURCE_ICONS[data.source] ?? "●"}
+            {SOURCE_ICONS[data.source] ?? "o"}
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
       {hovered && (
         <div
@@ -182,7 +218,7 @@ function SentimentNode({ data }) {
             position: "absolute",
             top:
               (isPrediction
-                ? size * PREDICTION_KITE_SCALE * PREDICTION_KITE_HEIGHT_MULT
+                ? size * PREDICTION_LEAF_HEIGHT_MULT + 20
                 : size) + 8,
             left: "50%",
             transform: "translateX(-50%)",
