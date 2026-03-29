@@ -829,8 +829,29 @@ async def scrape_youtube(query: str):
 # ON-DEMAND TOPIC SCRAPE (用户输入话题 → 立刻采集)
 # ============================================================
 
+def filter_relevant(items: list[dict], topic: str, threshold: float = 0.3) -> list[dict]:
+    """只保留跟话题真正相关的items，过滤噪音"""
+    keywords = [kw.strip().lower() for kw in topic.split() if len(kw.strip()) > 2]
+    if not keywords:
+        return items
+
+    relevant = []
+    for item in items:
+        text = (item.get("text", "") or item.get("question", "")).lower()
+        if not text:
+            continue
+        # 计算关键词命中率
+        hits = sum(1 for kw in keywords if kw in text)
+        score = hits / len(keywords)
+        if score >= threshold:
+            item["relevance_score"] = round(score, 2)
+            relevant.append(item)
+
+    return relevant
+
+
 async def on_demand_scrape(topic: str):
-    """用户输入一个新话题，立刻并行采集 → 单独聚合 → sentiment分析 → 推送"""
+    """用户输入一个新话题，立刻并行采集 → 过滤相关 → 分析 → 推送"""
     await broadcast({"type": "status", "message": f"Searching for: {topic}..."})
     print(f"\n[ON-DEMAND] Scraping topic: {topic}")
 
@@ -845,26 +866,45 @@ async def on_demand_scrape(topic: str):
     )
 
     new_count = len(ALL_DATA) - before
-    new_items = ALL_DATA[before:]  # 只取这次新采集的数据
-    print(f"[ON-DEMAND] Done — {new_count} new items for '{topic}'")
-    await broadcast({"type": "status", "message": f"Found {new_count} items for: {topic}. Analyzing..."})
+    new_items = ALL_DATA[before:]
 
-    # 只对新数据做聚合+sentiment
+    # 过滤只保留相关内容
+    relevant = filter_relevant(new_items, topic)
+    noise = new_count - len(relevant)
+    print(f"[ON-DEMAND] Collected {new_count}, relevant: {len(relevant)}, noise filtered: {noise}")
+    await broadcast({"type": "status", "message": f"Found {len(relevant)} relevant items for: {topic} (filtered {noise} noise). Analyzing..."})
+
+    # 用相关数据做分析+sentiment+enrichment
     from aggregator import analyze_topic_with_sentiment, HAS_ANTHROPIC
-    if HAS_ANTHROPIC and new_items:
-        result = await analyze_topic_with_sentiment(topic, new_items)
+    from enrichment import enrich_data
+
+    if HAS_ANTHROPIC and relevant:
+        # Sentiment分析
+        result = await analyze_topic_with_sentiment(topic, relevant)
+
+        # Enrichment（事件+实体+矛盾）也只用相关数据
+        enrichment = await enrich_data(relevant)
+
         if result:
+            # 合并enrichment结果到topic_analysis
+            result["enrichment"] = {
+                "events": enrichment.get("events", []),
+                "entities": enrichment.get("entities", {}),
+                "contradictions": enrichment.get("contradictions", []),
+                "stats": enrichment.get("stats", {}),
+                "top_stories": enrichment.get("top_stories", []),
+            }
+
             await broadcast(result)
             save_json()
-            # 也保存这个话题的单独JSON
+
             topic_path = os.path.join(OUTPUT_DIR, f"topic_{topic.replace(' ', '_')}.json")
             with open(topic_path, "w", encoding="utf-8") as f:
                 json.dump(result, f, indent=2, ensure_ascii=False)
             print(f"[ON-DEMAND] Saved {topic_path}")
     else:
-        # fallback: 只推数据不做sentiment
         from aggregator import discover_topics_keyword
-        topics = discover_topics_keyword(new_items)
+        topics = discover_topics_keyword(relevant if relevant else new_items)
         if topics:
             await broadcast({
                 "type": "topics",
@@ -1106,10 +1146,12 @@ async def main(topic: str, port: int = 8765):
         except Exception as e:
             print(f"[INIT] Topic discovery error: {e}")
 
-        # 立刻跑enrichment
+        # 立刻跑enrichment（只用相关数据）
         print("[INIT] Running enrichment (dedup + entities + contradictions)...\n")
         try:
-            await enrich_data(ALL_DATA, broadcast)
+            relevant_init = filter_relevant(ALL_DATA, topic, threshold=0.2)
+            print(f"[INIT] Filtered {len(ALL_DATA)} → {len(relevant_init)} relevant items for enrichment")
+            await enrich_data(relevant_init, broadcast)
         except Exception as e:
             print(f"[INIT] Enrichment error: {e}")
 

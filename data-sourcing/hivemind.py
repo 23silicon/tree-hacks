@@ -37,6 +37,7 @@ from aggregator import (
     analyze_topic_with_sentiment, HAS_ANTHROPIC,
 )
 from enrichment import enrich_data, deduplicate, get_credibility
+from stream_server import filter_relevant
 
 
 def _run(coro):
@@ -86,10 +87,11 @@ def search(query: str, include_sentiment: bool = True) -> dict:
         )
 
         new_items = ALL_DATA[before:]
-        print(f"[search] Collected {len(new_items)} items for '{query}'")
+        relevant = filter_relevant(new_items, query)
+        print(f"[search] Collected {len(new_items)}, relevant: {len(relevant)} for '{query}'")
 
-        if include_sentiment and HAS_ANTHROPIC and new_items:
-            result = await analyze_topic_with_sentiment(query, new_items)
+        if include_sentiment and HAS_ANTHROPIC and relevant:
+            result = await analyze_topic_with_sentiment(query, relevant)
             if result:
                 return result
 
