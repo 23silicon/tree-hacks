@@ -209,14 +209,14 @@ function InfoIcon({ index }: { index: number }) {
 }
 
 const buttonVariants = {
-  initial: { x: 0, width: 124 },
-  step1: { x: 0, width: 124 },
-  step2: { x: -38, width: 320 },
+  initial: { x: 0, width: 124, height: 48 },
+  step1: { x: 0, width: 124, height: 48 },
+  step2: { x: 0, width: 420, height: 156 },
 };
 
 const iconVariants = {
-  hidden: { x: -50, opacity: 0 },
-  visible: { x: 18, opacity: 1 },
+  hidden: { opacity: 0, scale: 0.9 },
+  visible: { opacity: 1, scale: 1 },
 };
 
 function useDebounce<T>(value: T, delay: number): T {
@@ -292,7 +292,7 @@ type GooeySearchBarProps = {
 };
 
 export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const [state, setState] = useState<SearchState>({
     step: 1,
@@ -304,17 +304,33 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
   const debouncedSearchText = useDebounce(state.searchText, 500);
   const isUnsupported = useMemo(() => isUnsupportedBrowser(), []);
 
-  const handleButtonClick = () => {
-    setState((prevState) => ({ ...prevState, step: 2 }));
+  const canSubmitToGraph = Boolean(onEnterGraph && state.searchText.trim() !== "");
+
+  const submitToGraph = () => {
+    if (!canSubmitToGraph) return;
+    onEnterGraph?.();
   };
 
-  const handleSearch = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleButtonClick = () => {
+    if (state.step === 1) {
+      setState((prevState) => ({ ...prevState, step: 2 }));
+      return;
+    }
+    submitToGraph();
+  };
+
+  const handleSearch = (
+    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
     setState((prevState) => ({ ...prevState, searchText: e.target.value }));
   };
 
-  const handleInputKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && state.searchText.trim() !== "") {
-      onEnterGraph?.();
+  const handleInputKeyDown = (
+    e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>,
+  ) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitToGraph();
     }
   };
 
@@ -376,7 +392,13 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
   }, [debouncedSearchText]);
 
   return (
-    <div className={clsx("gooey-search", isUnsupported && "no-goo")}>
+    <div
+      className={clsx(
+        "gooey-search",
+        state.step === 2 && "is-expanded",
+        isUnsupported && "no-goo",
+      )}
+    >
       <GooeyFilter />
 
       <div className="button-content">
@@ -384,7 +406,7 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
           className="button-content-inner"
           initial="initial"
           animate={state.step === 1 ? "step1" : "step2"}
-          transition={{ duration: 0.75, type: "spring", bounce: 0.15 }}
+          transition={{ duration: 0.58, type: "spring", stiffness: 280, damping: 30 }}
         >
           <AnimatePresence mode="popLayout">
             <motion.div
@@ -439,12 +461,13 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
             {state.step === 1 ? (
               <span className="search-text">Search</span>
             ) : (
-              <input
+              <textarea
                 ref={inputRef}
-                type="text"
-                className="search-input"
-                placeholder="Type R..."
+                className="search-input search-input-box"
+                placeholder="Type your topic here..."
                 aria-label="Search input"
+                rows={4}
+                value={state.searchText}
                 onChange={handleSearch}
                 onKeyDown={handleInputKeyDown}
               />
@@ -456,6 +479,16 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
               <motion.div
                 key="icon"
                 className="separate-element"
+                onClick={submitToGraph}
+                role="button"
+                tabIndex={canSubmitToGraph ? 0 : -1}
+                aria-disabled={!canSubmitToGraph}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    submitToGraph();
+                  }
+                }}
                 initial="hidden"
                 animate="visible"
                 exit="hidden"
