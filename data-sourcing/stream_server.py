@@ -47,6 +47,8 @@ async def broadcast(data: dict):
         SEEN_IDS.add(data["id"])
     if data.get("type") == "topics":
         LATEST_TOPICS = data.get("topics", [])
+    elif data.get("type") == "enrichment":
+        LATEST_ENRICHMENT.update(data)
     elif data.get("type") not in ("status",):
         ALL_DATA.append(data)
     msg = json.dumps(data, ensure_ascii=False)
@@ -900,13 +902,45 @@ def save_json(topics_data=None):
         json.dump(output, f, indent=2, ensure_ascii=False)
 
 
+LATEST_ENRICHMENT: dict = {}  # 最新的enrichment结果
+
+
 async def json_save_loop(interval: int = 30):
-    """每30秒保存一次JSON"""
+    """每30秒保存统一输出JSON — 队友只需要读这一个文件"""
     while True:
         await asyncio.sleep(interval)
-        if ALL_DATA:
-            save_json()
-            print(f"[JSON] Saved hivemind_output.json ({len(ALL_DATA)} items, {len(LATEST_TOPICS)} topics)")
+        if not ALL_DATA:
+            continue
+
+        save_json()
+
+        # 统一输出: 合并所有分析结果到一个文件
+        unified = {
+            "meta": {
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "total_raw_items": len(ALL_DATA),
+                "sources": {},
+            },
+            # 话题发现
+            "topics": LATEST_TOPICS,
+            # Enrichment (去重+事件+实体+矛盾)
+            "enrichment": LATEST_ENRICHMENT if LATEST_ENRICHMENT else None,
+            # 最近的原始数据 (去重前)
+            "raw_items": [
+                {k: v for k, v in item.items() if k not in ("raw",)}
+                for item in ALL_DATA[-200:]
+            ],
+        }
+
+        for item in ALL_DATA:
+            s = item.get("source", "unknown")
+            unified["meta"]["sources"][s] = unified["meta"]["sources"].get(s, 0) + 1
+
+        path = os.path.join(OUTPUT_DIR, "final_output.json")
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(unified, f, indent=2, ensure_ascii=False)
+
+        print(f"[JSON] Saved final_output.json ({len(ALL_DATA)} items, {len(LATEST_TOPICS)} topics)")
 
 
 # ============================================================
@@ -963,6 +997,10 @@ async def ws_handler(ws):
             "topics": LATEST_TOPICS,
             "data_count": len(ALL_DATA),
         }, ensure_ascii=False))
+
+    # 立刻发送最新enrichment
+    if LATEST_ENRICHMENT:
+        await ws.send(json.dumps(LATEST_ENRICHMENT, ensure_ascii=False))
 
     try:
         async for msg in ws:
