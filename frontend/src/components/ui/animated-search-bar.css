@@ -1,0 +1,177 @@
+/* Ported from gooey-search (Codrops); scoped for header layout + dark app chrome */
+
+@keyframes gooey-search-rotate {
+  100% {
+    transform: rotate(180deg);
+  }
+}
+
+.gooey-search > svg[aria-hidden="true"] {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.gooey-search {
+  width: 100%;
+  height: auto;
+  min-height: 112px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 14px 16px 40px;
+  box-sizing: border-box;
+  position: relative;
+  z-index: 20;
+  flex-shrink: 0;
+  pointer-events: auto;
+}
+
+.gooey-search.no-goo .button-content .button-content-inner {
+  filter: none !important;
+}
+
+.gooey-search.no-goo .button-content .button-content-inner .search-results .search-result {
+  padding: 7.5px 10px;
+}
+
+.gooey-search.no-goo .button-content .button-content-inner .search-btn {
+  padding: 8px 14px;
+  min-height: 42px;
+}
+
+.gooey-search.no-goo .button-content .button-content-inner .search-btn .search-text {
+  pointer-events: none;
+  text-align: center;
+  position: relative;
+  left: 0;
+}
+
+.gooey-search.no-goo .button-content .button-content-inner .separate-element {
+  width: 42px;
+  height: 42px;
+}
+
+.gooey-search .button-content {
+  position: relative;
+  left: auto;
+  top: auto;
+  transform: none;
+}
+
+.gooey-search .button-content-inner {
+  filter: url(#goo-effect);
+  cursor: pointer;
+  max-width: max-content;
+}
+
+.gooey-search .search-results {
+  position: relative;
+  z-index: -1;
+}
+
+.gooey-search .search-result {
+  background-color: #000000;
+  border-radius: 40px;
+  padding: 14px 22px;
+  width: 100%;
+  color: #ddd;
+  position: absolute;
+  left: -38px;
+  font-size: 14px;
+}
+
+.gooey-search .search-result-title {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.gooey-search .search-result-title span {
+  position: relative;
+  top: -0.35px;
+}
+
+.gooey-search .search-result-title svg {
+  position: relative;
+  top: 2px;
+  width: 18px;
+  height: 18px;
+}
+
+.gooey-search .search-btn {
+  color: rgba(221, 221, 221, 0.69);
+  cursor: pointer;
+  letter-spacing: -0.5px;
+  background-color: #000000;
+  outline: none;
+  border: none;
+  border-radius: 9999px;
+  padding: 13px 24px;
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+}
+
+.gooey-search .search-btn .search-text {
+  pointer-events: none;
+  text-align: center;
+  position: relative;
+  left: 4px;
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.gooey-search .search-input {
+  width: 100%;
+  background-color: transparent;
+  outline: none;
+  border: none;
+  color: #dddddd;
+  font-size: 15px;
+  line-height: 1.25;
+  min-height: 22px;
+}
+
+.gooey-search .separate-element {
+  position: absolute;
+  background-color: #000000;
+  width: 52px;
+  height: 52px;
+  right: -6px;
+  top: -2px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border-radius: 9999px;
+}
+
+@media (max-width: 767px) {
+  .gooey-search .separate-element {
+    scale: 1.1;
+    top: 2px;
+  }
+
+  .gooey-search .separate-element svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+.gooey-search .separate-element svg {
+  width: 20px;
+  height: 20px;
+}
+
+.gooey-search .separate-element svg path {
+  fill: #dddddd;
+}
+
+.gooey-search .separate-element svg.loading-icon {
+  width: 20px;
+  height: 20px;
+  animation: gooey-search-rotate 0.5s linear infinite;
+  transform-origin: center center;
+}
