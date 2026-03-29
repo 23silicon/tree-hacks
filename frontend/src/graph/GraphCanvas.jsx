@@ -535,7 +535,24 @@ export default function GraphCanvas() {
   }, [simulation, simNodes, predIdSet, setNodes, setEdges, tickLoop]);
 
   return (
-    <div style={{ width: "100%", height: "100%" }}>
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        backgroundColor: "#050806",
+        backgroundImage: "linear-gradient(135deg, rgba(5, 150, 100, 0.14) 0%, rgba(5, 83, 71, 0.08) 50%, rgba(6, 78, 59, 0.12) 100%)",
+        position: "relative",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: "linear-gradient(180deg, rgba(5, 8, 6, 0.75) 0%, transparent 35%, rgba(5, 8, 6, 0.4) 100%)",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -555,8 +572,9 @@ export default function GraphCanvas() {
         minZoom={0.2}
         maxZoom={2.5}
         proOptions={{ hideAttribution: true }}
+        style={{ position: "relative", zIndex: 0 }}
       >
-        <Background color="#1e293b" gap={24} size={1} />
+        <Background color="#0f4c3a" gap={24} size={1} />
         <Controls
           position="bottom-right"
           style={{ background: "#1e1e2e", borderColor: "#334155" }}
@@ -606,6 +624,15 @@ export default function GraphCanvas() {
           </div>
         </Panel>
       </ReactFlow>
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          backgroundImage: "linear-gradient(180deg, rgba(5, 8, 6, 0) 0%, transparent 50%, rgba(5, 8, 6, 0.15) 100%)",
+          pointerEvents: "none",
+          zIndex: 2,
+        }}
+      />
     </div>
   );
 }

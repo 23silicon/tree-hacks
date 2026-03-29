@@ -396,7 +396,7 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
       className={clsx(
         "gooey-search",
         state.step === 2 && "is-expanded",
-        isUnsupported && "no-goo",
+        isUnsupported && "no-goo"
       )}
     >
       <GooeyFilter />
@@ -483,7 +483,7 @@ export const GooeySearchBar = ({ onEnterGraph }: GooeySearchBarProps) => {
                 role="button"
                 tabIndex={canSubmitToGraph ? 0 : -1}
                 aria-disabled={!canSubmitToGraph}
-                onKeyDown={(e) => {
+                onKeyDown={(e: React.KeyboardEvent) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
                     submitToGraph();
