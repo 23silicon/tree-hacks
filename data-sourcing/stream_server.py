@@ -30,15 +30,19 @@ from aggregator import aggregator_loop
 CONNECTIONS: set = set()
 ALL_DATA: list[dict] = []
 SEEN_IDS: set = set()
+LATEST_TOPICS: list[dict] = []  # 最新发现的话题，新客户端连上立刻发
 
 
 async def broadcast(data: dict):
-    global CONNECTIONS
+    global CONNECTIONS, LATEST_TOPICS
     if data.get("id") in SEEN_IDS:
         return
     if data.get("id"):
         SEEN_IDS.add(data["id"])
-    ALL_DATA.append(data)
+    if data.get("type") == "topics":
+        LATEST_TOPICS = data.get("topics", [])
+    elif data.get("type") not in ("status",):
+        ALL_DATA.append(data)
     msg = json.dumps(data, ensure_ascii=False)
     dead = set()
     for ws in CONNECTIONS:
@@ -87,25 +91,66 @@ async def fetch_google_news(query: str, region: str = "US:en") -> int:
     return count
 
 
-async def scrape_all_news(topic: str):
-    """多角度并行查询Google News — 最大化覆盖"""
-    # 从主题派生多个搜索角度
-    base_words = topic.split()
-    queries = [
-        topic,                                    # 原始查询
-        f"{topic} timeline",                      # 时间线
-        f"{topic} latest",                        # 最新
-        f"{topic} breaking",                      # 突发
-        f"{topic} analysis",                      # 分析
-        f"{topic} reaction",                      # 反应
-        f"{topic} economic impact",               # 经济影响
-        f"{topic} diplomatic",                    # 外交
-    ]
-    # 只取前6个避免太多请求
-    queries = queries[:6]
+async def _fetch_gnews_url(url: str, query: str) -> int:
+    """Fetch a specific Google News RSS URL."""
+    count = 0
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(url, timeout=10)
+            if resp.status_code != 200:
+                return 0
+            root = ET.fromstring(resp.text)
+            for item in root.findall(".//item"):
+                title = item.findtext("title", "")
+                link = item.findtext("link", "")
+                pub_date = item.findtext("pubDate", "")
+                source_el = item.find("source")
+                source_name = source_el.text if source_el is not None else "Unknown"
+                pid = f"gnews_{hashlib.md5(link.encode()).hexdigest()[:12]}"
+                await broadcast({
+                    "type": "news", "id": pid, "source": "google_news",
+                    "author": source_name, "text": title,
+                    "timestamp": pub_date, "url": link, "query": query,
+                })
+                count += 1
+        except Exception as e:
+            pass
+    return count
 
-    print(f"[GOOGLE NEWS] Launching {len(queries)} parallel queries...")
-    results = await asyncio.gather(*[fetch_google_news(q) for q in queries])
+
+async def scrape_all_news(topic: str):
+    """多角度 + 多地区并行查询Google News"""
+    queries = [
+        topic,
+        f"{topic} latest",
+        f"{topic} breaking",
+        f"{topic} analysis",
+        f"{topic} reaction",
+        f"{topic} economic impact",
+        f"{topic} timeline",
+        f"{topic} opinion",
+        f"{topic} update today",
+    ]
+
+    # 多地区：同一话题在不同国家的报道
+    REGIONS = [
+        ("US:en", "en-US", "US"),
+        ("GB:en", "en-GB", "GB"),
+        ("AU:en", "en-AU", "AU"),
+        ("IN:en", "en-IN", "IN"),
+        ("CA:en", "en-CA", "CA"),
+    ]
+
+    all_tasks = []
+    for q in queries[:6]:
+        all_tasks.append(fetch_google_news(q))  # default US
+    # 主查询的多地区版本
+    for ceid, hl, gl in REGIONS[1:]:  # skip US (already have it)
+        url = f"https://news.google.com/rss/search?q={topic}&hl={hl}&gl={gl}&ceid={ceid}"
+        all_tasks.append(_fetch_gnews_url(url, topic))
+
+    print(f"[GOOGLE NEWS] Launching {len(all_tasks)} parallel queries (6 angles + 4 regions)...")
+    results = await asyncio.gather(*all_tasks)
     total = sum(results)
     print(f"[GOOGLE NEWS] Done — {total} articles (deduped: {len([d for d in ALL_DATA if d.get('source') == 'google_news'])})")
 
@@ -128,6 +173,15 @@ RSS_FEEDS = {
     "ABC News": "https://abcnews.go.com/abcnews/internationalheadlines",
     "The Hill": "https://thehill.com/feed/",
     "NY Post": "https://nypost.com/feed/",
+    "Guardian World": "https://www.theguardian.com/world/rss",
+    "CNN Top": "http://rss.cnn.com/rss/edition.rss",
+    "NBC News": "https://feeds.nbcnews.com/nbcnews/public/news",
+    "Politico": "https://rss.politico.com/politics-news.xml",
+    "Axios": "https://api.axios.com/feed/",
+    "Business Insider": "https://www.businessinsider.com/rss",
+    "Yahoo News": "https://news.yahoo.com/rss/",
+    "Drudge Report": "https://feeds.feedburner.com/DrudgeReportFeed",
+    "MarketWatch": "http://feeds.marketwatch.com/marketwatch/topstories/",
 }
 
 
@@ -549,6 +603,209 @@ async def scrape_polymarket(query: str):
 
 
 # ============================================================
+# SOURCE: Google Trends (热搜话题自动发现)
+# ============================================================
+
+async def fetch_google_trends() -> list[str]:
+    """拉Google Trends热搜词，返回当前最热的话题列表"""
+    trending = []
+    async with httpx.AsyncClient() as client:
+        # Google Trends RSS — 实时热搜
+        try:
+            resp = await client.get(
+                "https://trends.google.com/trending/rss?geo=US",
+                timeout=10,
+            )
+            if resp.status_code == 200:
+                root = ET.fromstring(resp.text)
+                for item in root.findall(".//{http://www.w3.org/2005/Atom}entry"):
+                    title = item.findtext("{http://www.w3.org/2005/Atom}title", "")
+                    if title:
+                        trending.append(title)
+
+                # fallback: try standard RSS item format
+                if not trending:
+                    for item in root.findall(".//item"):
+                        title = item.findtext("title", "")
+                        if title:
+                            trending.append(title)
+        except Exception as e:
+            print(f"  [TRENDS] RSS error: {e}")
+
+        # Backup: Google Trends daily trends page
+        if not trending:
+            try:
+                resp = await client.get(
+                    "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US",
+                    timeout=10,
+                )
+                if resp.status_code == 200:
+                    root = ET.fromstring(resp.text)
+                    for item in root.findall(".//item"):
+                        title = item.findtext("title", "")
+                        if title:
+                            trending.append(title)
+            except Exception:
+                pass
+
+    if trending:
+        print(f"[TRENDS] Found {len(trending)} trending topics: {', '.join(trending[:5])}")
+    else:
+        print(f"[TRENDS] Could not fetch trending topics")
+
+    return trending[:20]
+
+
+async def scrape_trending():
+    """自动发现Google Trends热搜 → 对每个热门话题采集新闻"""
+    trending = await fetch_google_trends()
+
+    for topic in trending[:5]:  # 只取top 5避免太多请求
+        await broadcast({"type": "status", "message": f"Scraping trending: {topic}"})
+        await scrape_all_news(topic)
+        await asyncio.sleep(1)
+
+    if trending:
+        await broadcast({
+            "type": "trending",
+            "topics": trending,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        })
+
+
+# ============================================================
+# SOURCE: Hacker News (免费API，科技/商业话题)
+# ============================================================
+
+async def scrape_hackernews():
+    """拉Hacker News前30条热门帖子"""
+    count = 0
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get("https://hacker-news.firebaseio.com/v0/topstories.json", timeout=10)
+            if resp.status_code != 200:
+                return
+
+            story_ids = resp.json()[:30]
+
+            # 并行拉每个story的详情
+            async def fetch_story(sid):
+                nonlocal count
+                try:
+                    r = await client.get(f"https://hacker-news.firebaseio.com/v0/item/{sid}.json", timeout=5)
+                    if r.status_code != 200:
+                        return
+                    s = r.json()
+                    if not s or s.get("type") != "story":
+                        return
+                    await broadcast({
+                        "type": "news",
+                        "id": f"hn_{sid}",
+                        "source": "hackernews",
+                        "author": s.get("by", "?"),
+                        "text": s.get("title", ""),
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(s.get("time", 0))),
+                        "url": s.get("url", f"https://news.ycombinator.com/item?id={sid}"),
+                        "score": s.get("score", 0),
+                        "comments": s.get("descendants", 0),
+                    })
+                    count += 1
+                except Exception:
+                    pass
+
+            await asyncio.gather(*[fetch_story(sid) for sid in story_ids])
+        except Exception as e:
+            print(f"  [HN] Error: {e}")
+
+    print(f"[HACKER NEWS] {count} stories collected")
+
+
+# ============================================================
+# ON-DEMAND TOPIC SCRAPE (用户输入话题 → 立刻采集)
+# ============================================================
+
+async def on_demand_scrape(topic: str):
+    """用户输入一个新话题，立刻并行采集 → 单独聚合 → sentiment分析 → 推送"""
+    await broadcast({"type": "status", "message": f"Searching for: {topic}..."})
+    print(f"\n[ON-DEMAND] Scraping topic: {topic}")
+
+    before = len(ALL_DATA)
+
+    await asyncio.gather(
+        scrape_all_news(topic),
+        scrape_all_rss(topic),
+        scrape_polymarket(topic),
+        scrape_reddit(topic),
+    )
+
+    new_count = len(ALL_DATA) - before
+    new_items = ALL_DATA[before:]  # 只取这次新采集的数据
+    print(f"[ON-DEMAND] Done — {new_count} new items for '{topic}'")
+    await broadcast({"type": "status", "message": f"Found {new_count} items for: {topic}. Analyzing..."})
+
+    # 只对新数据做聚合+sentiment
+    from aggregator import analyze_topic_with_sentiment, HAS_ANTHROPIC
+    if HAS_ANTHROPIC and new_items:
+        result = await analyze_topic_with_sentiment(topic, new_items)
+        if result:
+            await broadcast(result)
+            save_json()
+            # 也保存这个话题的单独JSON
+            topic_path = os.path.join(OUTPUT_DIR, f"topic_{topic.replace(' ', '_')}.json")
+            with open(topic_path, "w", encoding="utf-8") as f:
+                json.dump(result, f, indent=2, ensure_ascii=False)
+            print(f"[ON-DEMAND] Saved {topic_path}")
+    else:
+        # fallback: 只推数据不做sentiment
+        from aggregator import discover_topics_keyword
+        topics = discover_topics_keyword(new_items)
+        if topics:
+            await broadcast({
+                "type": "topics",
+                "topics": topics,
+                "mode": "keyword",
+                "data_count": len(ALL_DATA),
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            })
+
+
+# ============================================================
+# JSON OUTPUT (队友可以直接读)
+# ============================================================
+
+OUTPUT_DIR = os.path.dirname(__file__)
+
+def save_json(topics_data=None):
+    """保存当前所有数据到JSON文件"""
+    output = {
+        "meta": {
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "total_items": len(ALL_DATA),
+            "sources": {},
+        },
+        "topics": topics_data or LATEST_TOPICS,
+        "items": ALL_DATA[-500:],  # 最近500条
+    }
+    # 统计来源
+    for item in ALL_DATA:
+        s = item.get("source", "unknown")
+        output["meta"]["sources"][s] = output["meta"]["sources"].get(s, 0) + 1
+
+    path = os.path.join(OUTPUT_DIR, "hivemind_output.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(output, f, indent=2, ensure_ascii=False)
+
+
+async def json_save_loop(interval: int = 30):
+    """每30秒保存一次JSON"""
+    while True:
+        await asyncio.sleep(interval)
+        if ALL_DATA:
+            save_json()
+            print(f"[JSON] Saved hivemind_output.json ({len(ALL_DATA)} items, {len(LATEST_TOPICS)} topics)")
+
+
+# ============================================================
 # POLLING LOOP (持续刷新)
 # ============================================================
 
@@ -562,6 +819,8 @@ async def poll_loop(topic: str, interval: int = 45):
             scrape_all_rss(topic),
             scrape_polymarket(topic),
             scrape_reddit(topic),
+            scrape_hackernews(),
+            scrape_trending(),
         )
         print(f"[REFRESH] Total items streamed: {len(ALL_DATA)}")
 
@@ -582,17 +841,37 @@ async def ws_handler(ws):
     addr = ws.remote_address
     print(f"[WS] +1 client ({addr}) — {len(CONNECTIONS)} connected")
 
-    # 发送快照
+    # 发送快照（限制大小，只发最近200条）
     if ALL_DATA:
+        snapshot_items = ALL_DATA[-200:]
         await ws.send(json.dumps({
             "type": "snapshot",
-            "data": ALL_DATA,
+            "data": snapshot_items,
             "count": len(ALL_DATA),
+            "total": len(ALL_DATA),
+        }, ensure_ascii=False))
+
+    # 立刻发送最新topics
+    if LATEST_TOPICS:
+        await ws.send(json.dumps({
+            "type": "topics",
+            "topics": LATEST_TOPICS,
+            "data_count": len(ALL_DATA),
         }, ensure_ascii=False))
 
     try:
         async for msg in ws:
-            pass  # 前端不需要发消息过来，纯推流
+            # 前端可以发请求
+            try:
+                cmd = json.loads(msg)
+                if cmd.get("action") == "search_topic":
+                    # 用户输入新话题 → 重新采集
+                    new_topic = cmd.get("topic", "")
+                    if new_topic:
+                        print(f"[WS] Client requested topic: {new_topic}")
+                        asyncio.create_task(on_demand_scrape(new_topic))
+            except json.JSONDecodeError:
+                pass
     except websockets.ConnectionClosed:
         pass
     finally:
@@ -634,7 +913,7 @@ async def main(topic: str, port: int = 8765):
     print(f"""
 {'='*60}
   HIVEMIND DATA STREAM
-  Topic: {topic}
+  Default topic: {topic} (also scrapes Google Trends + Hacker News)
 {'='*60}
 
   OPEN IN BROWSER:
@@ -647,18 +926,42 @@ async def main(topic: str, port: int = 8765):
 """)
 
     async with serve(ws_handler, "0.0.0.0", port):
-        # 初始采集（全部并行）
+        # 初始采集（全部并行，Bluesky只等5秒不阻塞）
         print("[INIT] Starting initial data collection...\n")
         await asyncio.gather(
             scrape_all_news(topic),
             scrape_all_rss(topic),
             scrape_polymarket(topic),
             scrape_reddit(topic),
-            scrape_reddit_comments(topic),
-            stream_bluesky(topic, duration=15),
+            scrape_hackernews(),
+            scrape_trending(),
+            stream_bluesky(topic, duration=5),  # 缩短到5秒，后面loop继续监听
         )
 
         print(f"\n[INIT] Done — {len(ALL_DATA)} total items streamed")
+
+        # 立刻跑一次aggregator，不等30秒
+        print("[INIT] Running initial topic discovery...\n")
+        from aggregator import discover_topics_llm, discover_topics_keyword, HAS_ANTHROPIC
+        try:
+            if HAS_ANTHROPIC:
+                init_topics = await discover_topics_llm(ALL_DATA)
+            else:
+                init_topics = discover_topics_keyword(ALL_DATA)
+            if init_topics:
+                await broadcast({
+                    "type": "topics",
+                    "topics": init_topics,
+                    "mode": "llm" if HAS_ANTHROPIC else "keyword",
+                    "data_count": len(ALL_DATA),
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                })
+                # 保存JSON给队友
+                save_json(init_topics)
+                print(f"[INIT] {len(init_topics)} topics discovered")
+        except Exception as e:
+            print(f"[INIT] Topic discovery error: {e}")
+
         print(f"[INIT] Entering continuous mode\n")
 
         # 持续运行：新闻轮询 + Reddit轮询 + Bluesky实时 + 话题聚合
@@ -667,6 +970,7 @@ async def main(topic: str, port: int = 8765):
             reddit_loop(topic),
             bluesky_loop(topic),
             aggregator_loop(ALL_DATA, broadcast, interval=30),
+            json_save_loop(interval=30),
         )
 
 

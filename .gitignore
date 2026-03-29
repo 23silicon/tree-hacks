@@ -1,3 +1,5 @@
 __pycache__/
 *.pyc
 output.json
+hivemind_output.json
+.env

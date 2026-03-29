@@ -335,3 +335,167 @@ async def aggregator_loop(all_data: list, broadcast_fn, interval: int = 30):
             print(f"[AGGREGATOR] Error: {e}")
 
         await asyncio.sleep(interval)
+
+
+# ============================================================
+# ON-DEMAND: 单话题深度分析 + SENTIMENT
+# ============================================================
+
+async def analyze_topic_with_sentiment(topic: str, items: list[dict]) -> dict | None:
+    """
+    对用户搜索的单个话题做深度分析:
+    1. 发现子话题
+    2. 每条内容做sentiment分析
+    3. 生成整体sentiment摘要
+    """
+    if not items:
+        return None
+
+    print(f"[SENTIMENT] Analyzing {len(items)} items for '{topic}'...")
+    start = time.time()
+
+    sample = items[:80]
+    headlines = []
+    for i, item in enumerate(sample):
+        text = item.get("text", "") or item.get("question", "")
+        source = item.get("source", "?")
+        headlines.append(f"[{i}] ({source}) {text[:200]}")
+
+    prompt = f"""Analyze these {len(headlines)} articles/posts about "{topic}".
+
+Do TWO things:
+
+1. TOPIC DISCOVERY: Group into 3-5 sub-topics. For each:
+   - "name": sub-topic name
+   - "category": politics/sports/economic/social/tech/entertainment
+   - "keywords": 3-5 keywords
+   - "heat": 0.0-1.0
+   - "headline_indices": which [i] belong here
+
+2. SENTIMENT ANALYSIS: For each headline, classify:
+   - "sentiment": "positive" / "negative" / "neutral"
+   - "score": -1.0 to 1.0
+   - "emotion": primary emotion (excitement, concern, anger, hope, humor, etc.)
+
+Return JSON:
+{{
+  "sub_topics": [...],
+  "sentiments": [
+    {{"index": 0, "sentiment": "positive", "score": 0.7, "emotion": "excitement"}},
+    ...
+  ],
+  "overall_sentiment": {{
+    "score": 0.0,
+    "label": "positive/negative/neutral/mixed",
+    "summary": "One sentence summary of overall sentiment"
+  }}
+}}
+
+Only valid JSON, no other text.
+
+Content:
+{chr(10).join(headlines)}"""
+
+    try:
+        response = await anthropic_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4000,
+            messages=[{"role": "user", "content": prompt}]
+        )
+
+        text = response.content[0].text.strip()
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        analysis = json.loads(text)
+
+        elapsed = time.time() - start
+
+        # Build sub-topic objects
+        sub_topics = []
+        for st in analysis.get("sub_topics", []):
+            indices = st.get("headline_indices", [])
+            matched = [sample[i] for i in indices if i < len(sample)]
+            keywords = [kw.lower() for kw in st.get("keywords", [])]
+
+            for item in items:
+                item_text = (item.get("text", "") or "").lower()
+                if any(kw in item_text for kw in keywords):
+                    if item not in matched:
+                        matched.append(item)
+
+            sources = {}
+            for item in matched:
+                s = item.get("source", "unknown")
+                sources[s] = sources.get(s, 0) + 1
+
+            sub_topics.append({
+                "id": re.sub(r'[^a-z0-9]+', '-', st.get("name", "").lower()).strip('-'),
+                "name": st.get("name", ""),
+                "category": st.get("category", "general"),
+                "heat": st.get("heat", 0.5),
+                "keywords": keywords,
+                "item_count": len(matched),
+                "sources": sources,
+                "latest": matched[0].get("text", "")[:150] if matched else "",
+            })
+
+        # Attach sentiment to items
+        sentiments = analysis.get("sentiments", [])
+        sentiment_scores = []
+        for s in sentiments:
+            idx = s.get("index", 0)
+            if idx < len(sample):
+                sample[idx]["sentiment"] = s.get("sentiment", "neutral")
+                sample[idx]["sentiment_score"] = s.get("score", 0)
+                sample[idx]["emotion"] = s.get("emotion", "unknown")
+                sentiment_scores.append(s.get("score", 0))
+
+        overall = analysis.get("overall_sentiment", {})
+
+        result = {
+            "type": "topic_analysis",
+            "query": topic,
+            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "elapsed_seconds": round(elapsed, 1),
+            "total_items": len(items),
+            "analyzed_items": len(sample),
+            "sub_topics": sub_topics,
+            "overall_sentiment": {
+                "score": overall.get("score", sum(sentiment_scores) / max(len(sentiment_scores), 1)),
+                "label": overall.get("label", "neutral"),
+                "summary": overall.get("summary", ""),
+            },
+            "sentiment_distribution": {
+                "positive": sum(1 for s in sentiments if s.get("sentiment") == "positive"),
+                "negative": sum(1 for s in sentiments if s.get("sentiment") == "negative"),
+                "neutral": sum(1 for s in sentiments if s.get("sentiment") == "neutral"),
+            },
+            "items": [
+                {
+                    "id": item.get("id"),
+                    "source": item.get("source"),
+                    "author": item.get("author"),
+                    "text": item.get("text", "")[:300],
+                    "timestamp": item.get("timestamp"),
+                    "url": item.get("url"),
+                    "sentiment": item.get("sentiment", "neutral"),
+                    "sentiment_score": item.get("sentiment_score", 0),
+                    "emotion": item.get("emotion", "unknown"),
+                }
+                for item in sample
+            ],
+        }
+
+        dist = result["sentiment_distribution"]
+        print(f"[SENTIMENT] Done in {elapsed:.1f}s — {topic}")
+        print(f"  Overall: {result['overall_sentiment']['label']} ({result['overall_sentiment']['score']:+.2f})")
+        print(f"  Distribution: +{dist['positive']} / ={dist['neutral']} / -{dist['negative']}")
+        print(f"  Sub-topics: {', '.join(t['name'] for t in sub_topics)}")
+
+        return result
+
+    except Exception as e:
+        print(f"[SENTIMENT] Error: {e}")
+        return None
