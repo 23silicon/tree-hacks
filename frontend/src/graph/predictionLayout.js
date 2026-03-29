@@ -22,6 +22,33 @@ export function getDescendantNodeIds(graphNodes) {
     .map((n) => n.id);
 }
 
+/** Descendants in chronological order (oldest first) for reset-view reveal. */
+export function getSortedDescendantIds(graphNodes) {
+  return graphNodes
+    .filter((n) => n.data?.category === "descendant")
+    .sort(
+      (a, b) =>
+        new Date(a.data.timestamp).getTime() -
+        new Date(b.data.timestamp).getTime()
+    )
+    .map((n) => n.id);
+}
+
+/** Branch + newBranch in chronological order for reset-view reveal (after descendants). */
+export function getSortedBranchIds(graphNodes) {
+  return graphNodes
+    .filter(
+      (n) =>
+        n.data?.category === "branch" || n.data?.category === "newBranch"
+    )
+    .sort(
+      (a, b) =>
+        new Date(a.data.timestamp).getTime() -
+        new Date(b.data.timestamp).getTime()
+    )
+    .map((n) => n.id);
+}
+
 export function getBranchNodeCount(graphNodes) {
   return graphNodes.filter(
     (n) =>

@@ -39,6 +39,7 @@ function SentimentNode({ data }) {
   const { bg, glow } = colorsFor(category);
   const size = nodeSize(category);
   const iconSize = category === "root" ? 20 : 16;
+  const revealed = data.reveal !== false;
 
   return (
     <div
@@ -67,8 +68,13 @@ function SentimentNode({ data }) {
           boxShadow: hovered
             ? `0 0 24px 8px ${glow}, 0 0 48px 16px ${glow}`
             : `0 0 12px 4px ${glow}`,
-          transition: "box-shadow 0.25s ease, transform 0.2s ease",
-          transform: hovered ? "scale(1.15)" : "scale(1)",
+          transition:
+            "box-shadow 0.25s ease, transform 0.42s cubic-bezier(0.34, 1.45, 0.64, 1)",
+          transform: hovered
+            ? "scale(1.15)"
+            : revealed
+              ? "scale(1)"
+              : "scale(0.82)",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

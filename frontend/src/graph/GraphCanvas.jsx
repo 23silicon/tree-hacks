@@ -7,7 +7,6 @@ import {
   Panel,
   useNodesState,
   useEdgesState,
-  useReactFlow,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -25,6 +24,9 @@ import {
   applyResetViewLayout,
   getBranchNodeCount,
   getPredictionArcRadiusPx,
+  getPredictionNodeIds,
+  getSortedDescendantIds,
+  getSortedBranchIds,
 } from "./predictionLayout";
 
 const nodeTypes = { sentiment: SentimentNode };
@@ -35,6 +37,11 @@ const CANVAS_H = 800;
 
 const ARC_SLIDER_MAX = 100;
 const ARC_SLIDER_STEP = 2;
+
+/** Reset-view reveal: node fades in, then incident edges after a beat. */
+const REVEAL_NODE_MS = 340;
+const REVEAL_LINK_AFTER_MS = 220;
+const REVEAL_STEP_GAP_MS = 90;
 
 const ROOT_RETURN_RATE = 0.065;
 const ROOT_HOME_EPS = 1.25;
@@ -67,27 +74,35 @@ function initSimulationBundle(layoutParamsRef) {
   return bundle;
 }
 
-function buildFlowNodes(simNodes) {
+const allGraphNodeIds = new Set(sampleNodes.map((n) => n.id));
+
+function buildFlowNodes(simNodes, revealedIds) {
   return sampleNodes.map((n) => {
     const sn = simNodes.find((s) => s.id === n.id);
+    const revealed = revealedIds.has(n.id);
     return {
       id: n.id,
       type: "sentiment",
       position: { x: sn.x, y: sn.y },
-      data: n.data,
+      // Do not set `style.transform` on nodes — React Flow uses transform for
+      // translate(x,y); overriding it stacks every node at the origin.
+      data: { ...n.data, reveal: revealed },
       draggable: true,
+      style: {
+        opacity: revealed ? 1 : 0,
+        transition: "opacity 0.42s cubic-bezier(0.33, 1, 0.68, 1)",
+        pointerEvents: revealed ? "auto" : "none",
+      },
     };
   });
 }
 
 function ResetViewButton({ onResetLayout }) {
-  const { fitView } = useReactFlow();
   return (
     <button
       type="button"
       onClick={() => {
         onResetLayout();
-        fitView({ padding: 0.18, duration: 450 });
       }}
       style={{
         padding: "10px 16px",
@@ -106,19 +121,26 @@ function ResetViewButton({ onResetLayout }) {
   );
 }
 
-function buildEdges() {
+function buildFlowEdges(linkedIds) {
   return sampleEdges.map((e) => {
     const sourceNode = sampleNodes.find((n) => n.id === e.source);
     const targetNode = sampleNodes.find((n) => n.id === e.target);
     const c = colorsFor(sourceNode?.data?.category ?? "branch");
     const targetCategory = targetNode?.data?.category;
+    const linked =
+      linkedIds.has(e.source) && linkedIds.has(e.target);
     return {
       id: e.id,
       type: "circleIntersect",
       source: e.source,
       target: e.target,
-      style: { stroke: c.edge, strokeWidth: 2 },
-      animated: targetCategory === "prediction",
+      style: {
+        stroke: c.edge,
+        strokeWidth: 2,
+        opacity: linked ? 1 : 0,
+        transition: "opacity 0.5s ease",
+      },
+      animated: linked && targetCategory === "prediction",
     };
   });
 }
@@ -136,12 +158,19 @@ export default function GraphCanvas() {
   }
   const { simulation, simNodes, predIdSet } = simBundleRef.current;
 
-  const initialNodes = useMemo(() => buildFlowNodes(simNodes), [simNodes]);
+  const initialNodes = useMemo(
+    () => buildFlowNodes(simNodes, allGraphNodeIds),
+    [simNodes]
+  );
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, , onEdgesChange] = useEdgesState(buildEdges());
+  const [edges, setEdges, onEdgesChange] = useEdgesState(
+    buildFlowEdges(allGraphNodeIds)
+  );
 
   const draggingRef = useRef(null);
   const rafRef = useRef(null);
+  const reactFlowInstanceRef = useRef(null);
+  const resetAnimGenRef = useRef(0);
 
   const applySimPositions = useCallback(
     (pinnedId) => {
@@ -221,8 +250,15 @@ export default function GraphCanvas() {
     };
   }, []);
 
+  const revealEverything = useCallback(() => {
+    setNodes(buildFlowNodes(simNodes, allGraphNodeIds));
+    setEdges(buildFlowEdges(allGraphNodeIds));
+  }, [simNodes, setNodes, setEdges]);
+
   const onNodeDragStart = useCallback(
     (_event, node) => {
+      resetAnimGenRef.current += 1;
+      revealEverything();
       draggingRef.current = node.id;
       const sn = simNodes.find((s) => s.id === node.id);
       if (sn) {
@@ -237,7 +273,7 @@ export default function GraphCanvas() {
         rafRef.current = requestAnimationFrame(tickLoop);
       }
     },
-    [simulation, simNodes, predIdSet, tickLoop]
+    [simulation, simNodes, predIdSet, tickLoop, revealEverything]
   );
 
   const onNodeDrag = useCallback(
@@ -304,6 +340,9 @@ export default function GraphCanvas() {
   );
 
   const handleResetView = useCallback(() => {
+    resetAnimGenRef.current += 1;
+    const gen = resetAnimGenRef.current;
+
     if (rafRef.current) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
@@ -321,20 +360,60 @@ export default function GraphCanvas() {
     simulation.alpha(1);
     settleSimulation(simulation, 500);
     simulation.stop();
-    setNodes((prev) =>
-      prev.map((n) => {
-        const sn = simNodes.find((s) => s.id === n.id);
-        if (!sn) return n;
-        return { ...n, position: { x: sn.x, y: sn.y } };
-      })
-    );
-  }, [simulation, simNodes, predIdSet, setNodes]);
+
+    const rootId = "root";
+    const predIds = getPredictionNodeIds(sampleNodes);
+    const revealed = new Set([rootId, ...predIds]);
+    const linked = new Set([rootId, ...predIds]);
+
+    setNodes(buildFlowNodes(simNodes, revealed));
+    setEdges(buildFlowEdges(linked));
+
+    const rf = reactFlowInstanceRef.current;
+    requestAnimationFrame(() => {
+      rf?.fitView({ padding: 0.18, duration: 480 });
+    });
+
+    const wait = (ms) =>
+      new Promise((resolve) => {
+        setTimeout(resolve, ms);
+      });
+
+    const descendantIds = getSortedDescendantIds(sampleNodes);
+    const branchIds = getSortedBranchIds(sampleNodes);
+    const sequence = [...descendantIds, ...branchIds];
+
+    (async () => {
+      await wait(120);
+      if (gen !== resetAnimGenRef.current) return;
+
+      for (const id of sequence) {
+        if (gen !== resetAnimGenRef.current) return;
+        revealed.add(id);
+        setNodes(buildFlowNodes(simNodes, revealed));
+        await wait(REVEAL_NODE_MS);
+        if (gen !== resetAnimGenRef.current) return;
+        linked.add(id);
+        setEdges(buildFlowEdges(linked));
+        await wait(REVEAL_LINK_AFTER_MS + REVEAL_STEP_GAP_MS);
+        if (gen !== resetAnimGenRef.current) return;
+      }
+
+      requestAnimationFrame(() => {
+        if (gen !== resetAnimGenRef.current) return;
+        reactFlowInstanceRef.current?.fitView({ padding: 0.18, duration: 520 });
+      });
+    })();
+  }, [simulation, simNodes, predIdSet, setNodes, setEdges]);
 
   return (
     <div style={{ width: "100%", height: "100%" }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        onInit={(instance) => {
+          reactFlowInstanceRef.current = instance;
+        }}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onNodeDragStart={onNodeDragStart}
