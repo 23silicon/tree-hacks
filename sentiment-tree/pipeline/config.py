@@ -30,3 +30,14 @@ class PipelineConfig:
 
     # Pipeline
     batch_size: int = 32
+
+    # ─── Affinity pipeline (event → prediction scoring) ───────────
+
+    # Stage 1: embedding candidate filter threshold
+    affinity_embedding_threshold: float = 0.50
+
+    # Stage 2: LLM scoring
+    llm_provider: str = "anthropic"       # "anthropic", "openai", or "ollama"
+    llm_model: str = "claude-sonnet-4-20250514"  # fast + capable for scoring
+    llm_base_url: str | None = None       # override for Ollama etc.
+    llm_temperature: float = 0.1          # low temp for consistent scoring

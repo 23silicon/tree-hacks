@@ -1,160 +1,420 @@
-# SentimentTree — Embedding Pipeline (Role 2)
+# SentimentTree Role 2 Integration Guide
 
-Embedding, tagging, relevance filtering, directional sentiment analysis, and semantic search pipeline for the SentimentTree project.
+This folder contains Role 2 of the SentimentTree application: the semantic processing layer that sits between raw ingestion and downstream decision, clustering, or UI stages.
 
-## Architecture
+There are currently two supported workflows:
 
-```
-Raw Items (Role 1)
-       │
-       ▼
-  ┌──────────┐
-  │ Embedder │  sentence-transformers (all-MiniLM-L6-v2)
-  └────┬─────┘
-       │ vectors
-       ▼
-  ┌──────────────────┐
-  │ Relevance Filter │  cosine similarity vs. contract question
-  └────┬─────────────┘
-       │ relevant items only
-       ▼
-  ┌───────────────────┐
-  │ Sentiment Scorer  │  zero-shot classification (BART-MNLI)
-  └────┬──────────────┘   directional: yes/no relative to contract
-       │
-       ▼
-  ┌────────┐
-  │ Tagger │  spaCy NER + keyword topic tagging
-  └────┬───┘
-       │
-       ▼
-  ┌──────────────┐
-  │ Vector Store │  ChromaDB (persistent, cosine distance)
-  └────┬─────────┘
-       │
-       ▼
-  Enriched Items (Role 3)  +  Semantic Search API
-```
+1. The original text enrichment pipeline for generic scraped items.
+2. The newer event to prediction affinity pipeline for scoring how live events affect prediction market outcomes.
 
-## Setup
+If you are another agent or engineer integrating this stage into adjacent stages, use this document as the contract of record.
 
-```bash
+## What This Stage Owns
+
+Role 2 is responsible for turning raw text or event objects into structured, semantically useful outputs.
+
+It provides:
+
+- Local embeddings using `BAAI/bge-small-en-v1.5`
+- Relevance filtering
+- Directional sentiment scoring for contract-centric text analysis
+- Named entity and topic tagging
+- Persistent vector storage in ChromaDB
+- Semantic search over stored enriched items
+- Event to prediction candidate filtering with embeddings
+- Event to prediction LLM scoring with streamed dictionary outputs
+
+It does not provide:
+
+- Web scraping or upstream event collection
+- Final branching, clustering, ranking, or UI presentation
+- Market execution or any trading logic
+
+## Repository Layout
+
+Key files:
+
+- `main.py`: CLI entry point
+- `pipeline/config.py`: central config defaults
+- `pipeline/models.py`: all Pydantic contracts shared across stages
+- `pipeline/pipeline.py`: original enrichment pipeline orchestrator
+- `pipeline/affinity_pipeline.py`: two-stage event to prediction pipeline
+- `pipeline/candidate_filter.py`: Stage 1 embedding filter for event/prediction pairs
+- `pipeline/llm_scorer.py`: Stage 2 LLM scoring
+- `pipeline/vector_store.py`: ChromaDB persistence and retrieval
+- `pipeline/semantic_search.py`: semantic search wrapper
+- `events_example.json`: sample event payload
+- `polymarket_preds.json`: sample prediction payload
+- `tests/test_pipeline_stages.py`: regression coverage for the original pipeline
+
+## Runtime Assumptions
+
+This project was stabilized on Python 3.11 after dependency issues on Python 3.13.
+
+Recommended environment:
+
+- Python `3.11.x`
+- Editable install via `pip install -e .`
+- CLI command: `sentimentree`
+
+Install flow:
+
+```powershell
 cd sentiment-tree
-
-# Create virtual environment
-python -m venv .venv
-.venv\Scripts\activate   # Windows
-# source .venv/bin/activate  # macOS/Linux
-
-# Install dependencies
 pip install -r requirements.txt
-
-# Download spaCy model
 python -m spacy download en_core_web_sm
+pip install -e .
 ```
 
-## Usage
+Environment variables:
 
-### Run pipeline on sample data
+- `CLAUDE_API_KEY` or `ANTHROPIC_API_KEY` for Anthropic
+- `OPENAI_API_KEY` for OpenAI-compatible providers
+- Optional `HF_TOKEN` to avoid Hugging Face download rate limits
 
-```bash
-python main.py run
+The CLI loads `.env` automatically through `python-dotenv`.
+
+## Pipeline A: Generic Text Enrichment
+
+Use this when upstream sends generic scraped text and downstream needs enriched semantic features.
+
+Flow:
+
+```text
+RawItem
+  -> embedding
+  -> relevance filter against a contract question
+  -> directional sentiment score
+  -> NER and topic tags
+  -> optional ChromaDB storage
+  -> EnrichedItem
 ```
 
-This processes 5 sample items against the contract question "Will Bitcoin reach $100k by end of 2026?", filters for relevance, scores directional sentiment, extracts entities/tags, and stores to ChromaDB.
+Primary orchestrator:
 
-### Search stored items
+- `pipeline.pipeline.Pipeline`
 
-```bash
-python main.py search "institutional buying"
-python main.py search "regulation" --source news_rss
-```
+### Input Contract
 
-### Show pipeline info
-
-```bash
-python main.py info
-```
-
-### Adjust relevance threshold
-
-```bash
-python main.py run --threshold 0.3
-```
-
-## Data Models
-
-### Input: `RawItem` (from Role 1)
-
-| Field       | Type     | Description                   |
-|-------------|----------|-------------------------------|
-| `text`      | str      | Scraped content               |
-| `source`    | str      | Platform (reddit, x, etc.)    |
-| `timestamp` | datetime | ISO 8601                      |
-| `url`       | str      | Source URL                     |
-
-### Output: `EnrichedItem` (to Role 3)
-
-| Field                  | Type        | Description                                    |
-|------------------------|-------------|------------------------------------------------|
-| `text`                 | str         | Original text                                  |
-| `source`               | str         | Platform                                       |
-| `timestamp`            | datetime    | Original timestamp                             |
-| `url`                  | str         | Source URL                                      |
-| `embedding`            | list[float] | Semantic embedding vector                      |
-| `sentiment_score`      | float       | Directional sentiment, -1 (no) to 1 (yes)     |
-| `sentiment_confidence` | float       | Confidence 0-1                                 |
-| `topic_tags`           | list[str]   | Topic labels                                   |
-| `entities`             | list[str]   | Named entities                                 |
-| `relevance_score`      | float       | Cosine similarity to contract question (0-1)   |
-
-## Pipeline Components
-
-| Module               | Class             | Purpose                                        |
-|----------------------|-------------------|------------------------------------------------|
-| `pipeline/embedder.py`          | `Embedder`          | Sentence-transformer embeddings       |
-| `pipeline/relevance_filter.py`  | `RelevanceFilter`   | Cosine similarity filtering           |
-| `pipeline/sentiment_scorer.py`  | `SentimentScorer`   | Zero-shot directional sentiment       |
-| `pipeline/tagger.py`            | `Tagger`            | spaCy NER + topic tagging             |
-| `pipeline/vector_store.py`      | `VectorStore`       | ChromaDB storage and retrieval        |
-| `pipeline/semantic_search.py`   | `SemanticSearch`    | Natural language search interface     |
-| `pipeline/pipeline.py`          | `Pipeline`          | Full pipeline orchestrator            |
-
-## Configuration
-
-All defaults in `pipeline/config.py`. Override by passing a `PipelineConfig` instance:
+`RawItem` from `pipeline/models.py`
 
 ```python
-from pipeline.config import PipelineConfig
-from pipeline.pipeline import Pipeline
-
-config = PipelineConfig(
-    relevance_threshold=0.3,
-    embedding_model="all-MiniLM-L6-v2",
-    sentiment_model="facebook/bart-large-mnli",
-)
-pipe = Pipeline("Will X happen?", config=config)
+{
+     "text": str,
+     "source": str,
+     "timestamp": datetime,
+     "url": str,
+}
 ```
 
-## Programmatic Usage
+### Output Contract
+
+`EnrichedItem` from `pipeline/models.py`
+
+```python
+{
+     "text": str,
+     "source": str,
+     "timestamp": datetime,
+     "url": str,
+     "embedding": list[float],
+     "sentiment_score": float,
+     "sentiment_confidence": float,
+     "topic_tags": list[str],
+     "entities": list[str],
+     "relevance_score": float,
+}
+```
+
+### Programmatic Example
 
 ```python
 from datetime import datetime, timezone
+
 from pipeline.models import RawItem
 from pipeline.pipeline import Pipeline
 
 pipe = Pipeline("Will Bitcoin reach $100k by end of 2026?")
 
 item = RawItem(
-    text="Bitcoin ETF inflows hit $1B this week",
-    source="news_rss",
-    timestamp=datetime.now(timezone.utc),
-    url="https://example.com/article",
+     text="Bitcoin ETF inflows hit $1B this week.",
+     source="news_rss",
+     timestamp=datetime.now(timezone.utc),
+     url="https://example.com/article",
 )
 
-enriched = pipe.process_single(item)
-if enriched:
-    print(f"Sentiment: {enriched.sentiment_score:+.4f}")
-    print(f"Relevance: {enriched.relevance_score:.4f}")
-    print(f"Entities:  {enriched.entities}")
+result = pipe.process_single(item)
+if result is not None:
+     enriched_dict = result.model_dump()
 ```
+
+### Downstream Handoff Guidance
+
+If another stage consumes the enrichment pipeline output, it should treat `relevance_score`, `sentiment_score`, `sentiment_confidence`, `topic_tags`, and `entities` as the stable handoff fields. The embedding vector is available, but downstream should not assume a different embedding size unless `embedding_model` changes intentionally.
+
+Current embedding model:
+
+- `BAAI/bge-small-en-v1.5`
+
+## Pipeline B: Event to Prediction Affinity
+
+Use this when upstream sends normalized event objects and a prediction market stage provides market contracts. This is the more important integration surface for the current application.
+
+Flow:
+
+```text
+Event + Prediction
+  -> Stage 1: embedding similarity filter
+  -> Stage 2: LLM scoring
+  -> streamed dict results and/or JSON output
+```
+
+Primary orchestrator:
+
+- `pipeline.affinity_pipeline.AffinityPipeline`
+
+### Input Contracts
+
+`EventSource`
+
+```python
+{
+     "Source": str,
+     "Link": str,
+     "Summary": str,
+}
+```
+
+`Event`
+
+```python
+{
+     "Title": str,
+     "Description": str,
+     "Sources": list[EventSource],
+     "ID": int,
+     "embedding": list[float] | None,
+}
+```
+
+`Prediction`
+
+```python
+{
+     "id": str,
+     "source": str,
+     "question": str,
+     "category": str,
+     "yes_probability": float,
+     "no_probability": float,
+     "volume_usd": float,
+     "liquidity_usd": float,
+     "closes_at": datetime,
+     "url": str,
+     "embedding": list[float] | None,
+}
+```
+
+Notes for upstream stages:
+
+- Event IDs should be stable integers.
+- If embeddings are already attached, Stage 1 will reuse them.
+- Predictions may come in as either a raw list or `{ "predictions": [...] }` through the CLI.
+
+### Stage 1 Output Contract
+
+`AffinityPipeline.stage1(...)` returns:
+
+```python
+list[tuple[Event, Prediction, float]]
+```
+
+Each tuple is:
+
+- `event`
+- `prediction`
+- `embedding_similarity`
+
+This is the cheapest integration point if a downstream stage wants to do custom scoring instead of using the built-in LLM scorer.
+
+### Stage 2 Output Contract
+
+`AffinityPipeline.stream(...)` yields dictionaries one at a time.
+
+Each dict has this shape:
+
+```python
+{
+     "event_id": int,
+     "prediction_id": str,
+     "event_title": str,
+     "prediction_question": str,
+     "embedding_similarity": float,
+     "direction": float,
+     "magnitude": float,
+     "reasoning": str,
+}
+```
+
+Field semantics:
+
+- `embedding_similarity`: Stage 1 topical similarity score
+- `direction`: `-1.0` means evidence toward NO, `+1.0` means evidence toward YES
+- `magnitude`: strength of evidence from `0.0` to `1.0`
+- `reasoning`: LLM explanation for downstream display, ranking, or auditing
+
+### Recommended Integration Pattern
+
+If the next stage wants progressive results, use the streaming interface directly.
+
+```python
+from pipeline.affinity_pipeline import AffinityPipeline
+from pipeline.config import PipelineConfig
+
+config = PipelineConfig(
+     affinity_embedding_threshold=0.50,
+     llm_provider="anthropic",
+     llm_model="claude-sonnet-4-20250514",
+)
+
+pipe = AffinityPipeline(config)
+stage1_candidates = pipe.stage1(events, predictions)
+
+for result_dict in pipe.stream(stage1_candidates):
+     handle_downstream(result_dict)
+```
+
+If the next stage wants a full in-memory list instead:
+
+```python
+candidates, results = pipe.run(events, predictions)
+```
+
+`results` is a `list[dict]`, not a list of Pydantic objects.
+
+### CLI Usage
+
+Show help:
+
+```powershell
+sentimentree --help
+```
+
+Run the original enrichment pipeline:
+
+```powershell
+sentimentree run
+```
+
+Search ChromaDB:
+
+```powershell
+sentimentree search "Iran war" -n 5
+sentimentree search "regulation" --source news_rss
+```
+
+Run affinity scoring without LLM calls:
+
+```powershell
+sentimentree affinity events_example.json polymarket_preds.json --skip-llm
+```
+
+Run full affinity scoring:
+
+```powershell
+sentimentree affinity events_example.json polymarket_preds.json
+```
+
+Write JSON results to disk:
+
+```powershell
+sentimentree affinity events_example.json polymarket_preds.json -o affinity_results.json
+```
+
+## Current Defaults
+
+The central defaults live in `pipeline/config.py`.
+
+Important current values:
+
+- `embedding_model = "BAAI/bge-small-en-v1.5"`
+- `relevance_threshold = 0.55`
+- `affinity_embedding_threshold = 0.50`
+- `llm_provider = "anthropic"`
+- `llm_model = "claude-sonnet-4-20250514"`
+- `llm_temperature = 0.1`
+
+If another stage depends on score calibration, do not silently change these defaults. In particular, threshold tuning is model-dependent.
+
+## Integration Notes By Neighbor Stage
+
+### Upstream Ingestion / Event Generation
+
+Provide clean, normalized event text. The affinity pipeline performs better when:
+
+- `Title` is short and factual
+- `Description` captures the event summary without duplication
+- `Sources[].Summary` contains concise evidence, not raw HTML or noise
+
+Low-quality summaries will directly degrade both embedding similarity and LLM reasoning quality.
+
+### Downstream Ranking / Clustering / UI
+
+Recommended usage:
+
+- Use `embedding_similarity` as a cheap first-pass relevance signal
+- Use `direction * magnitude` as a rough signed impact score
+- Preserve `reasoning` for user-visible explanations or review tooling
+- Keep `event_id` and `prediction_id` unchanged for joins with upstream records
+
+One practical signed score is:
+
+```python
+impact_score = result["direction"] * result["magnitude"]
+```
+
+This is not built into the pipeline, but it is a reasonable downstream feature.
+
+## Known Operational Constraints
+
+- The first model load can be slow because transformer weights download on demand.
+- Hugging Face warnings about unauthenticated requests are expected unless `HF_TOKEN` is configured.
+- The LLM scorer expects valid JSON back from the model and strips code fences defensively.
+- The current affinity tests are lighter than the original pipeline tests. Treat the affinity path as functional but still worth expanding.
+- `.env` must contain a valid provider key for full Stage 2 execution.
+
+## Fast Sanity Checks
+
+Verify the CLI is installed:
+
+```powershell
+sentimentree --help
+```
+
+Verify Stage 1 only:
+
+```powershell
+sentimentree affinity events_example.json polymarket_preds.json --skip-llm
+```
+
+Verify original pipeline tests:
+
+```powershell
+pytest tests/test_pipeline_stages.py -q
+```
+
+## What Another Agent Should Not Assume
+
+- Do not assume the original text enrichment pipeline and the event to prediction pipeline share the same output schema.
+- Do not assume the CLI name is `sentimenttree`; the registered command is `sentimentree`.
+- Do not assume Stage 2 returns Pydantic models; the streaming interface yields plain dictionaries.
+- Do not assume Python 3.13 compatibility.
+
+## Suggested Next Integration Points
+
+If you are extending this stage into the rest of the app, the cleanest seams are:
+
+1. Upstream adapter that normalizes Role 1 event payloads into `Event`.
+2. Prediction market adapter that normalizes Polymarket and Kalshi data into `Prediction`.
+3. Downstream scorer or brancher that consumes the dicts from `AffinityPipeline.stream(...)`.
+4. A persistence layer for storing affinity results keyed by `event_id` and `prediction_id`.

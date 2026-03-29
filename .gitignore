@@ -1,0 +1,6 @@
+sentiment-tree/.env
+sentiment-tree/__pycache__/
+sentiment-tree/pipeline/__pycache__/
+sentiment-tree/chroma_data/
+sentiment-tree/*.egg-info/
+.vscode/

@@ -1,14 +1,20 @@
+#!/usr/bin/env python3
+
 """CLI entry point for the SentimentTree embedding pipeline."""
 from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 import click
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env (CLAUDE_API_KEY, etc.)
 
 from pipeline.config import PipelineConfig
 from pipeline.embedder import Embedder
-from pipeline.models import RawItem
+from pipeline.models import Event, Prediction, RawItem
 from pipeline.pipeline import Pipeline
 from pipeline.semantic_search import SemanticSearch
 from pipeline.vector_store import VectorStore
@@ -55,7 +61,7 @@ def cli() -> None:
 
 
 @cli.command()
-@click.option("--threshold", default=0.25, help="Relevance threshold (0-1).")
+@click.option("--threshold", default=0.55, help="Relevance threshold (0-1).")
 def run(threshold: float) -> None:
     """Run the pipeline on sample data."""
     config = PipelineConfig(relevance_threshold=threshold)
@@ -129,6 +135,99 @@ def info() -> None:
     click.echo(f"  ChromaDB path:     {config.chroma_persist_dir}")
     click.echo(f"  Collection:        {config.chroma_collection}")
     click.echo(f"  Items in store:    {store.count()}")
+
+
+# ─── Affinity pipeline (event → prediction scoring) ─────────────────
+
+
+@cli.command()
+@click.argument("events_file", type=click.Path(exists=True))
+@click.argument("predictions_file", type=click.Path(exists=True))
+@click.option("--threshold", default=0.50, help="Stage 1 embedding similarity threshold.")
+@click.option("--skip-llm", is_flag=True, help="Only run Stage 1 (embedding filter), skip LLM.")
+@click.option("--output", "-o", default=None, help="Write results JSON to file.")
+def affinity(
+    events_file: str,
+    predictions_file: str,
+    threshold: float,
+    skip_llm: bool,
+    output: str | None,
+) -> None:
+    """Score how events relate to prediction market outcomes.
+
+    Two-stage pipeline:
+      Stage 1: Embedding cosine similarity (fast, filters ~80% of pairs)
+      Stage 2: LLM reasoning (direction + magnitude + explanation)
+
+    Example:
+      python main.py affinity events_example.json polymarket_preds.json
+      python main.py affinity events_example.json polymarket_preds.json --skip-llm
+    """
+    from pipeline.affinity_pipeline import AffinityPipeline
+
+    # Load events
+    with open(events_file, "r", encoding="utf-8") as f:
+        events_raw = json.load(f)
+    events = [Event(**e) for e in events_raw]
+
+    # Load predictions (handle wrapper object with "predictions" key)
+    with open(predictions_file, "r", encoding="utf-8") as f:
+        preds_raw = json.load(f)
+    if isinstance(preds_raw, dict) and "predictions" in preds_raw:
+        preds_list = preds_raw["predictions"]
+    elif isinstance(preds_raw, list):
+        preds_list = preds_raw
+    else:
+        raise click.ClickException("Predictions file must be a list or {predictions: [...]}.")
+    predictions = [Prediction(**p) for p in preds_list]
+
+    config = PipelineConfig(affinity_embedding_threshold=threshold)
+    pipe = AffinityPipeline(config)
+
+    click.echo(f"Events:      {len(events)}")
+    click.echo(f"Predictions: {len(predictions)}")
+    click.echo(f"Total pairs: {len(events) * len(predictions)}")
+    click.echo(f"Stage 1 threshold: {threshold}")
+    click.echo("=" * 65)
+
+    # Stage 1
+    click.echo("\n── Stage 1: Embedding candidate filtering ──")
+    candidates = pipe.stage1(events, predictions)
+
+    click.echo(f"   {len(candidates)} / {len(events) * len(predictions)} pairs passed embedding filter\n")
+
+    for event, pred, sim in candidates:
+        click.echo(f"   {sim:.4f}  Event[{event.ID}] \"{event.Title[:40]}\"")
+        click.echo(f"           ↔ \"{pred.question[:50]}\"")
+
+    results: list[dict] = []
+
+    if skip_llm:
+        click.echo("\n   (--skip-llm flag set, skipping Stage 2)")
+    elif candidates:
+        click.echo("\n── Stage 2: LLM affinity scoring ──\n")
+        for r in pipe.stream(candidates):
+            results.append(r)
+            arrow = "→ YES" if r["direction"] > 0 else "→ NO " if r["direction"] < 0 else "→ NEU"
+            click.echo(f"   Event[{r['event_id']}] × Pred[{r['prediction_id']}]")
+            click.echo(f"     Embedding sim: {r['embedding_similarity']:.4f}")
+            click.echo(f"     Direction:     {r['direction']:+.2f} {arrow}")
+            click.echo(f"     Magnitude:     {r['magnitude']:.2f}")
+            click.echo(f"     Reasoning:     {r['reasoning'][:120]}...")
+            click.echo()
+
+    # Output JSON
+    if output and results:
+        Path(output).write_text(json.dumps(results, indent=2, default=str), encoding="utf-8")
+        click.echo(f"\nResults written to {output}")
+    elif output and not results:
+        # Write stage 1 results if no LLM
+        out_data = [
+            {"event_id": e.ID, "prediction_id": p.id, "embedding_similarity": round(s, 4)}
+            for e, p, s in candidates
+        ]
+        Path(output).write_text(json.dumps(out_data, indent=2), encoding="utf-8")
+        click.echo(f"\nStage 1 results written to {output}")
 
 
 if __name__ == "__main__":
